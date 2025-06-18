@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Advanced Relations Visualization</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        h1 { color: #2196f3; }
+        #visualization { border: 1px solid #ccc; min-height: 400px; margin-top: 2em; }
+    </style>
+</head>
+<body>
+    <h1>Advanced Relations Visualization</h1>
+    <p>This is a placeholder for your visualization UI. You can draw graphs or diagrams here after processing entities and automations.</p>
+    <div id="visualization">
+        <!-- Visualization canvas or app goes here -->
+    </div>
+    <script>
+    // Use plain JS, no arrow functions, for maximum compatibility
+    document.addEventListener('DOMContentLoaded', function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/advancedrelations/trigger', true);
+      xhr.withCredentials = true;
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log('Trigger response:', xhr.responseText);
+          } else {
+            console.error('Trigger error:', xhr.status, xhr.statusText);
+          }
+        }
+      };
+      xhr.send();
+    });
+    </script>
+</body>
+</html>

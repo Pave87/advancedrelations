@@ -1,20 +1,17 @@
-"""Config flow for Your Integration."""
+"""Config flow for Advanced relations integration."""
 
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigFlow
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 
 from .const import DOMAIN
 
 
-class YourIntegrationConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Your Integration."""
+class AdvancedRelationsConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Advanced relations."""
 
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
-        if self._async_current_entries():
-            return self.async_abort(reason="single_instance_allowed")
-        return self.async_create_entry(title="Your Integration", data={})
+        return self.async_create_entry(title="Advanced relations", data={})
