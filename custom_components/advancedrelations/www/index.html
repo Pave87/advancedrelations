@@ -10,27 +10,110 @@
         #visualization { border: 1px solid #ccc; min-height: 400px; margin-top: 2em; }
         .section { margin-bottom: 2em; }
         .label { font-weight: bold; }
-        select { min-width: 300px; margin-top: 0.5em; }
+
+        /* Searchable dropdown styles */
+        .searchable-dropdown {
+            position: relative;
+            min-width: 300px;
+            margin-top: 0.5em;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        .search-input:focus {
+            border-color: #2196f3;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+        }
+
+        .dropdown-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #ccc;
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+
+        .dropdown-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+        }
+
+        .dropdown-item:hover {
+            background-color: #f5f5f5;
+        }
+
+        .dropdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .dropdown-item.selected {
+            background-color: #e3f2fd;
+        }
+
+        .no-results {
+            padding: 8px 12px;
+            color: #666;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
     <h1>Advanced Relations Visualization</h1>
     <div class="section">
         <span class="label">Entities:</span><br>
-        <select id="entities-dropdown"><option value="">-- Select an entity --</option></select>
+        <div class="searchable-dropdown" id="entities-dropdown">
+            <input type="text" class="search-input" placeholder="Search entities..." data-type="entities">
+            <div class="dropdown-list"></div>
+        </div>
     </div>
     <div class="section">
         <span class="label">Automations:</span><br>
-        <select id="automations-dropdown"><option value="">-- Select an automation --</option></select>
+        <div class="searchable-dropdown" id="automations-dropdown">
+            <input type="text" class="search-input" placeholder="Search automations..." data-type="automations">
+            <div class="dropdown-list"></div>
+        </div>
     </div>
     <div class="section">
         <span class="label">Scripts:</span><br>
-        <select id="scripts-dropdown"><option value="">-- Select a script --</option></select>
+        <div class="searchable-dropdown" id="scripts-dropdown">
+            <input type="text" class="search-input" placeholder="Search scripts..." data-type="scripts">
+            <div class="dropdown-list"></div>
+        </div>
     </div>
     <div id="visualization">
         <div id="flowchart-container"></div>
     </div>
     <script>
+    // Store all data for filtering
+    var allData = {
+        entities: [],
+        automations: [],
+        scripts: []
+    };
+
+    // Currently selected values
+    var selectedValues = {
+        entities: null,
+        automations: null,
+        scripts: null
+    };
+
     function renderFlowchart(data) {
       var container = document.getElementById('flowchart-container');
       container.innerHTML = '';
@@ -89,6 +172,128 @@
       xhr.send();
     }
 
+    function createSearchableDropdown(type, data) {
+        var dropdown = document.getElementById(type + '-dropdown');
+        var input = dropdown.querySelector('.search-input');
+        var list = dropdown.querySelector('.dropdown-list');
+
+        function filterAndRenderItems(searchTerm) {
+            list.innerHTML = '';
+            var filteredItems = data.filter(function(item) {
+                var searchableText = '';
+                if (type === 'entities') {
+                    searchableText = (item.friendly_name || '') + ' ' + item.entity_id;
+                } else {
+                    searchableText = item.alias + ' ' + item.id;
+                }
+                return searchableText.toLowerCase().includes(searchTerm.toLowerCase());
+            });
+
+            if (filteredItems.length === 0) {
+                var noResults = document.createElement('div');
+                noResults.className = 'no-results';
+                noResults.textContent = 'No results found';
+                list.appendChild(noResults);
+            } else {
+                filteredItems.forEach(function(item) {
+                    var itemDiv = document.createElement('div');
+                    itemDiv.className = 'dropdown-item';
+                    if (type === 'entities') {
+                        itemDiv.textContent = item.friendly_name && item.friendly_name !== item.entity_id
+                            ? item.friendly_name + ' (' + item.entity_id + ')'
+                            : item.entity_id;
+                        itemDiv.dataset.value = item.entity_id;
+                    } else {
+                        itemDiv.textContent = item.alias + ' (' + item.id + ')';
+                        itemDiv.dataset.value = item.id;
+                    }
+
+                    itemDiv.addEventListener('click', function() {
+                        var value = itemDiv.dataset.value;
+                        var displayText = itemDiv.textContent;
+
+                        input.value = displayText;
+                        selectedValues[type] = value;
+                        list.style.display = 'none';
+
+                        // Clear other selections
+                        Object.keys(selectedValues).forEach(function(key) {
+                            if (key !== type) {
+                                selectedValues[key] = null;
+                                var otherInput = document.querySelector('#' + key + '-dropdown .search-input');
+                                if (otherInput) otherInput.value = '';
+                            }
+                        });
+
+                        // Fetch and show flow
+                        var apiType = type === 'entities' ? 'entity' : type.slice(0, -1); // Remove 's' from end
+                        fetchAndShowFlow(apiType, value);
+                    });
+
+                    list.appendChild(itemDiv);
+                });
+            }
+        }
+
+        input.addEventListener('input', function() {
+            var searchTerm = input.value;
+            if (searchTerm.length > 0) {
+                filterAndRenderItems(searchTerm);
+                list.style.display = 'block';
+            } else {
+                list.style.display = 'none';
+                selectedValues[type] = null;
+                document.getElementById('flowchart-container').innerHTML = '';
+            }
+        });
+
+        input.addEventListener('focus', function() {
+            if (input.value.length > 0) {
+                filterAndRenderItems(input.value);
+                list.style.display = 'block';
+            }
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!dropdown.contains(e.target)) {
+                list.style.display = 'none';
+            }
+        });
+
+        // Handle keyboard navigation
+        input.addEventListener('keydown', function(e) {
+            var items = list.querySelectorAll('.dropdown-item');
+            var selectedItem = list.querySelector('.dropdown-item.selected');
+            var selectedIndex = -1;
+
+            if (selectedItem) {
+                selectedIndex = Array.from(items).indexOf(selectedItem);
+            }
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (selectedIndex < items.length - 1) {
+                    if (selectedItem) selectedItem.classList.remove('selected');
+                    items[selectedIndex + 1].classList.add('selected');
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (selectedIndex > 0) {
+                    if (selectedItem) selectedItem.classList.remove('selected');
+                    items[selectedIndex - 1].classList.add('selected');
+                }
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (selectedItem) {
+                    selectedItem.click();
+                }
+            } else if (e.key === 'Escape') {
+                list.style.display = 'none';
+            }
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
       var xhr = new XMLHttpRequest();
       xhr.open('GET', '/api/advancedrelations/data', true);
@@ -98,62 +303,16 @@
           if (xhr.status >= 200 && xhr.status < 300) {
             var data = {};
             try { data = JSON.parse(xhr.responseText); } catch (e) {}
-            var entitiesDropdown = document.getElementById('entities-dropdown');
-            var automationsDropdown = document.getElementById('automations-dropdown');
-            var scriptsDropdown = document.getElementById('scripts-dropdown');
-            // Entities
-            if (Array.isArray(data.entities)) {
-              data.entities.forEach(function(entity) {
-                var option = document.createElement('option');
-                if (entity.friendly_name && entity.friendly_name !== entity.entity_id) {
-                  option.textContent = entity.friendly_name + ' (' + entity.entity_id + ')';
-                } else {
-                  option.textContent = entity.entity_id;
-                }
-                option.value = entity.entity_id;
-                entitiesDropdown.appendChild(option);
-              });
-            }
-            // Automations
-            if (Array.isArray(data.automations)) {
-              data.automations.forEach(function(auto) {
-                var option = document.createElement('option');
-                option.textContent = auto.alias + ' (' + auto.id + ')';
-                option.value = auto.id;
-                automationsDropdown.appendChild(option);
-              });
-            }
-            // Scripts
-            if (Array.isArray(data.scripts)) {
-              data.scripts.forEach(function(script) {
-                var option = document.createElement('option');
-                option.textContent = script.alias + ' (' + script.id + ')';
-                option.value = script.id;
-                scriptsDropdown.appendChild(option);
-              });
-            }
-            // Add event listeners for dropdowns
-            entitiesDropdown.addEventListener('change', function() {
-              if (entitiesDropdown.value) {
-                fetchAndShowFlow('entity', entitiesDropdown.value);
-              } else {
-                document.getElementById('flowchart-container').innerHTML = '';
-              }
-            });
-            automationsDropdown.addEventListener('change', function() {
-              if (automationsDropdown.value) {
-                fetchAndShowFlow('automation', automationsDropdown.value);
-              } else {
-                document.getElementById('flowchart-container').innerHTML = '';
-              }
-            });
-            scriptsDropdown.addEventListener('change', function() {
-              if (scriptsDropdown.value) {
-                fetchAndShowFlow('script', scriptsDropdown.value);
-              } else {
-                document.getElementById('flowchart-container').innerHTML = '';
-              }
-            });
+
+            // Store all data
+            allData.entities = Array.isArray(data.entities) ? data.entities : [];
+            allData.automations = Array.isArray(data.automations) ? data.automations : [];
+            allData.scripts = Array.isArray(data.scripts) ? data.scripts : [];
+
+            // Create searchable dropdowns
+            createSearchableDropdown('entities', allData.entities);
+            createSearchableDropdown('automations', allData.automations);
+            createSearchableDropdown('scripts', allData.scripts);
           } else {
             console.error('Data fetch error:', xhr.status, xhr.statusText);
           }
