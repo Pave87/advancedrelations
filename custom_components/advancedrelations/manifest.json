@@ -1,6 +1,12 @@
 {
   "domain": "advancedrelations",
-  "name": "Advanced relations",
+  "name": "Advanced Relations",
   "config_flow": true,
-  "version": "1.0"
+  "documentation": "hhttps://github.com/Pave87/advancedrelations",
+  "issue_tracker": "https://github.com/Pave87/advancedrelations/issues",
+  "version": "0.0.1",
+  "codeowners": ["@Pave87"],
+  "dependencies": [],
+  "requirements": [],
+  "iot_class": "calculated"
 }
