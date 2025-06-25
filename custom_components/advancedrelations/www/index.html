@@ -7,7 +7,13 @@
     <style>
         body { font-family: Arial, sans-serif; margin: 2em; }
         h1 { color: #2196f3; }
-        #visualization { border: 1px solid #ccc; min-height: 400px; margin-top: 2em; }
+        #visualization {
+            border: 1px solid #ccc;
+            min-height: 400px;
+            margin-top: 2em;
+            overflow: auto;
+            max-height: 80vh;
+        }
         .section { margin-bottom: 2em; }
         .label { font-weight: bold; }
 
@@ -97,6 +103,23 @@
         </div>
     </div>
     <div id="visualization">
+        <div id="legend" style="background: #f9f9f9; padding: 15px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #ddd;">
+            <h3 style="margin-top: 0; color: #333;">Relationship Types:</h3>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <div style="background: #f44336; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: bold;">TRIGGER</div>
+                    <span>Entity/automation/script that triggers this item</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <div style="background: #ff9800; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: bold;">CONDITION</div>
+                    <span>Entity used in conditions/logic</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <div style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: bold;">OUTPUT</div>
+                    <span>Entity/automation/script that is controlled/called</span>
+                </div>
+            </div>
+        </div>
         <div id="flowchart-container"></div>
     </div>
     <script>
@@ -121,35 +144,141 @@
         container.textContent = 'No related items found.';
         return;
       }
-      // Simple vertical flowchart rendering
-      function createNode(label, type) {
+
+      // Enhanced flowchart rendering with relationship categorization
+      function createNode(node) {
         var div = document.createElement('div');
-        div.style.border = '1px solid #888';
-        div.style.padding = '6px 12px';
-        div.style.margin = '8px auto';
-        div.style.background = type === 'entity' ? '#e3f2fd' : (type === 'automation' ? '#fffde7' : '#e8f5e9');
-        div.style.borderRadius = '6px';
+        div.style.border = '2px solid #888';
+        div.style.padding = '10px';
+        div.style.margin = '10px';
+        div.style.borderRadius = '8px';
         div.style.textAlign = 'center';
-        div.textContent = label;
+        div.style.minWidth = '200px';
+        div.style.position = 'relative';
+
+        // Color coding by type
+        if (node.type === 'entity') {
+          div.style.background = '#e3f2fd';
+          div.style.borderColor = '#2196f3';
+        } else if (node.type === 'automation') {
+          div.style.background = '#fffde7';
+          div.style.borderColor = '#ff9800';
+        } else if (node.type === 'script') {
+          div.style.background = '#e8f5e9';
+          div.style.borderColor = '#4caf50';
+        }
+
+        // Add relationship indicator if present
+        if (node.relationship) {
+          var relationshipBadge = document.createElement('div');
+          relationshipBadge.style.position = 'absolute';
+          relationshipBadge.style.top = '-8px';
+          relationshipBadge.style.right = '-8px';
+          relationshipBadge.style.padding = '2px 6px';
+          relationshipBadge.style.fontSize = '10px';
+          relationshipBadge.style.borderRadius = '10px';
+          relationshipBadge.style.fontWeight = 'bold';
+          relationshipBadge.style.color = 'white';
+
+          if (node.relationship === 'trigger') {
+            relationshipBadge.style.background = '#f44336';
+            relationshipBadge.textContent = 'TRIGGER';
+          } else if (node.relationship === 'condition') {
+            relationshipBadge.style.background = '#ff9800';
+            relationshipBadge.textContent = 'CONDITION';
+          } else if (node.relationship === 'output') {
+            relationshipBadge.style.background = '#4caf50';
+            relationshipBadge.textContent = 'OUTPUT';
+          }
+
+          div.appendChild(relationshipBadge);
+        }
+
+        // Add reference indicator
+        if (node.is_reference) {
+          div.style.opacity = '0.6';
+          div.style.borderStyle = 'dashed';
+        }
+
+        var label = document.createElement('div');
+        label.textContent = node.label;
+        label.style.wordWrap = 'break-word';
+        div.appendChild(label);
+
         return div;
       }
-      function renderBranch(node, parentDiv) {
-        var nodeDiv = createNode(node.label, node.type);
+
+      function renderBranch(node, parentDiv, depth = 0) {
+        var nodeDiv = createNode(node);
         parentDiv.appendChild(nodeDiv);
-        if (node.children && node.children.length) {
-          var branchDiv = document.createElement('div');
-          branchDiv.style.display = 'flex';
-          branchDiv.style.justifyContent = 'center';
-          branchDiv.style.gap = '16px';
-          node.children.forEach(function(child) {
-            var childCol = document.createElement('div');
-            renderBranch(child, childCol);
-            branchDiv.appendChild(childCol);
-          });
-          parentDiv.appendChild(branchDiv);
+
+        if (node.children && node.children.length && depth < 6) {
+          // Group children by relationship type
+          var triggers = node.children.filter(child => child.relationship === 'trigger');
+          var conditions = node.children.filter(child => child.relationship === 'condition');
+          var outputs = node.children.filter(child => child.relationship === 'output');
+          var others = node.children.filter(child => !child.relationship);
+
+          var allGroups = [];
+          if (triggers.length > 0) allGroups.push({title: 'Triggers', children: triggers, color: '#ffebee'});
+          if (conditions.length > 0) allGroups.push({title: 'Conditions', children: conditions, color: '#fff3e0'});
+          if (outputs.length > 0) allGroups.push({title: 'Outputs', children: outputs, color: '#e8f5e9'});
+          if (others.length > 0) allGroups.push({title: 'Related', children: others, color: '#f5f5f5'});
+
+          if (allGroups.length > 0) {
+            var groupsContainer = document.createElement('div');
+            groupsContainer.style.display = 'flex';
+            groupsContainer.style.flexDirection = 'column';
+            groupsContainer.style.gap = '20px';
+            groupsContainer.style.marginTop = '20px';
+
+            allGroups.forEach(function(group) {
+              if (group.children.length === 0) return;
+
+              var groupDiv = document.createElement('div');
+              groupDiv.style.border = '1px solid #ddd';
+              groupDiv.style.borderRadius = '8px';
+              groupDiv.style.padding = '15px';
+              groupDiv.style.background = group.color;
+
+              var groupTitle = document.createElement('div');
+              groupTitle.textContent = group.title;
+              groupTitle.style.fontWeight = 'bold';
+              groupTitle.style.marginBottom = '10px';
+              groupTitle.style.fontSize = '14px';
+              groupTitle.style.color = '#333';
+              groupDiv.appendChild(groupTitle);
+
+              var childrenContainer = document.createElement('div');
+              childrenContainer.style.display = 'flex';
+              childrenContainer.style.flexWrap = 'wrap';
+              childrenContainer.style.gap = '10px';
+              childrenContainer.style.justifyContent = 'center';
+
+              group.children.forEach(function(child) {
+                var childWrapper = document.createElement('div');
+                childWrapper.style.flex = '1';
+                childWrapper.style.minWidth = '200px';
+                childWrapper.style.maxWidth = '300px';
+                renderBranch(child, childWrapper, depth + 1);
+                childrenContainer.appendChild(childWrapper);
+              });
+
+              groupDiv.appendChild(childrenContainer);
+              groupsContainer.appendChild(groupDiv);
+            });
+
+            parentDiv.appendChild(groupsContainer);
+          }
         }
       }
+
       var rootDiv = document.createElement('div');
+      rootDiv.style.display = 'flex';
+      rootDiv.style.flexDirection = 'column';
+      rootDiv.style.alignItems = 'center';
+      rootDiv.style.padding = '20px';
+
       renderBranch(data.root, rootDiv);
       container.appendChild(rootDiv);
     }
