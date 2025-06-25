@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Advanced Relations Visualization</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        h1 { color: #2196f3; }
+        #visualization { border: 1px solid #ccc; min-height: 400px; margin-top: 2em; }
+        .section { margin-bottom: 2em; }
+        .label { font-weight: bold; }
+        select { min-width: 300px; margin-top: 0.5em; }
+    </style>
+</head>
+<body>
+    <h1>Advanced Relations Visualization</h1>
+    <div class="section">
+        <span class="label">Entities:</span><br>
+        <select id="entities-dropdown"><option value="">-- Select an entity --</option></select>
+    </div>
+    <div class="section">
+        <span class="label">Automations:</span><br>
+        <select id="automations-dropdown"><option value="">-- Select an automation --</option></select>
+    </div>
+    <div class="section">
+        <span class="label">Scripts:</span><br>
+        <select id="scripts-dropdown"><option value="">-- Select a script --</option></select>
+    </div>
+    <div id="visualization">
+        <div id="flowchart-container"></div>
+    </div>
+    <script>
+    function renderFlowchart(data) {
+      var container = document.getElementById('flowchart-container');
+      container.innerHTML = '';
+      if (!data || !data.root) {
+        container.textContent = 'No related items found.';
+        return;
+      }
+      // Simple vertical flowchart rendering
+      function createNode(label, type) {
+        var div = document.createElement('div');
+        div.style.border = '1px solid #888';
+        div.style.padding = '6px 12px';
+        div.style.margin = '8px auto';
+        div.style.background = type === 'entity' ? '#e3f2fd' : (type === 'automation' ? '#fffde7' : '#e8f5e9');
+        div.style.borderRadius = '6px';
+        div.style.textAlign = 'center';
+        div.textContent = label;
+        return div;
+      }
+      function renderBranch(node, parentDiv) {
+        var nodeDiv = createNode(node.label, node.type);
+        parentDiv.appendChild(nodeDiv);
+        if (node.children && node.children.length) {
+          var branchDiv = document.createElement('div');
+          branchDiv.style.display = 'flex';
+          branchDiv.style.justifyContent = 'center';
+          branchDiv.style.gap = '16px';
+          node.children.forEach(function(child) {
+            var childCol = document.createElement('div');
+            renderBranch(child, childCol);
+            branchDiv.appendChild(childCol);
+          });
+          parentDiv.appendChild(branchDiv);
+        }
+      }
+      var rootDiv = document.createElement('div');
+      renderBranch(data.root, rootDiv);
+      container.appendChild(rootDiv);
+    }
+
+    function fetchAndShowFlow(type, id) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/advancedrelations/related?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id), true);
+      xhr.withCredentials = true;
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            var data = {};
+            try { data = JSON.parse(xhr.responseText); } catch (e) {}
+            renderFlowchart(data);
+          } else {
+            document.getElementById('flowchart-container').textContent = 'Error loading related data.';
+          }
+        }
+      };
+      xhr.send();
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/advancedrelations/data', true);
+      xhr.withCredentials = true;
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            var data = {};
+            try { data = JSON.parse(xhr.responseText); } catch (e) {}
+            var entitiesDropdown = document.getElementById('entities-dropdown');
+            var automationsDropdown = document.getElementById('automations-dropdown');
+            var scriptsDropdown = document.getElementById('scripts-dropdown');
+            // Entities
+            if (Array.isArray(data.entities)) {
+              data.entities.forEach(function(entity) {
+                var option = document.createElement('option');
+                if (entity.friendly_name && entity.friendly_name !== entity.entity_id) {
+                  option.textContent = entity.friendly_name + ' (' + entity.entity_id + ')';
+                } else {
+                  option.textContent = entity.entity_id;
+                }
+                option.value = entity.entity_id;
+                entitiesDropdown.appendChild(option);
+              });
+            }
+            // Automations
+            if (Array.isArray(data.automations)) {
+              data.automations.forEach(function(auto) {
+                var option = document.createElement('option');
+                option.textContent = auto.alias + ' (' + auto.id + ')';
+                option.value = auto.id;
+                automationsDropdown.appendChild(option);
+              });
+            }
+            // Scripts
+            if (Array.isArray(data.scripts)) {
+              data.scripts.forEach(function(script) {
+                var option = document.createElement('option');
+                option.textContent = script.alias + ' (' + script.id + ')';
+                option.value = script.id;
+                scriptsDropdown.appendChild(option);
+              });
+            }
+            // Add event listeners for dropdowns
+            entitiesDropdown.addEventListener('change', function() {
+              if (entitiesDropdown.value) {
+                fetchAndShowFlow('entity', entitiesDropdown.value);
+              } else {
+                document.getElementById('flowchart-container').innerHTML = '';
+              }
+            });
+            automationsDropdown.addEventListener('change', function() {
+              if (automationsDropdown.value) {
+                fetchAndShowFlow('automation', automationsDropdown.value);
+              } else {
+                document.getElementById('flowchart-container').innerHTML = '';
+              }
+            });
+            scriptsDropdown.addEventListener('change', function() {
+              if (scriptsDropdown.value) {
+                fetchAndShowFlow('script', scriptsDropdown.value);
+              } else {
+                document.getElementById('flowchart-container').innerHTML = '';
+              }
+            });
+          } else {
+            console.error('Data fetch error:', xhr.status, xhr.statusText);
+          }
+        }
+      };
+      xhr.send();
+    });
+    </script>
+</body>
+</html>

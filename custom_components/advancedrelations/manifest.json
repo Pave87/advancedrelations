@@ -1,0 +1,6 @@
+{
+  "domain": "advancedrelations",
+  "name": "Advanced relations",
+  "config_flow": true,
+  "version": "1.0"
+}
