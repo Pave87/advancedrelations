@@ -104,20 +104,40 @@
     </div>
     <div id="visualization">
         <div id="legend" style="background: #f9f9f9; padding: 15px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #ddd;">
-            <h3 style="margin-top: 0; color: #333;">Relationship Types:</h3>
-            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <div style="display: flex; align-items: center; gap: 5px;">
-                    <div style="background: #f44336; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: bold;">TRIGGER</div>
-                    <span>Entity/automation/script that triggers this item</span>
+            <h3 style="margin-top: 0; color: #333;">Flowchart Legend:</h3>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; background: #e3f2fd; border: 2px solid #2196f3; border-radius: 4px;"></div>
+                    <span>Entity</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 5px;">
-                    <div style="background: #ff9800; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: bold;">CONDITION</div>
-                    <span>Entity used in conditions/logic</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; background: #fffde7; border: 2px solid #ff9800; border-radius: 4px;"></div>
+                    <span>Automation</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 5px;">
-                    <div style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: bold;">OUTPUT</div>
-                    <span>Entity/automation/script that is controlled/called</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; background: #e8f5e9; border: 2px solid #4caf50; border-radius: 4px;"></div>
+                    <span>Script</span>
                 </div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-left: 20px;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <div style="width: 20px; height: 2px; background: #f44336;"></div>
+                        <div style="background: #f44336; color: white; padding: 2px 4px; border-radius: 8px; font-size: 9px; font-weight: bold;">T</div>
+                        <span style="font-size: 12px;">Trigger</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <div style="width: 20px; height: 2px; background: #ff9800;"></div>
+                        <div style="background: #ff9800; color: white; padding: 2px 4px; border-radius: 8px; font-size: 9px; font-weight: bold;">C</div>
+                        <span style="font-size: 12px;">Condition</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <div style="width: 20px; height: 2px; background: #4caf50;"></div>
+                        <div style="background: #4caf50; color: white; padding: 2px 4px; border-radius: 8px; font-size: 9px; font-weight: bold;">O</div>
+                        <span style="font-size: 12px;">Output</span>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                Tree visualization shows relationships with connecting lines. Dashed borders indicate circular references.
             </div>
         </div>
         <div id="flowchart-container"></div>
@@ -135,9 +155,7 @@
         entities: null,
         automations: null,
         scripts: null
-    };
-
-    function renderFlowchart(data) {
+    };    function renderFlowchart(data) {
       var container = document.getElementById('flowchart-container');
       container.innerHTML = '';
       if (!data || !data.root) {
@@ -145,142 +163,150 @@
         return;
       }
 
-      // Enhanced flowchart rendering with relationship categorization
-      function createNode(node) {
-        var div = document.createElement('div');
-        div.style.border = '2px solid #888';
-        div.style.padding = '10px';
-        div.style.margin = '10px';
-        div.style.borderRadius = '8px';
-        div.style.textAlign = 'center';
-        div.style.minWidth = '200px';
-        div.style.position = 'relative';
+      // Simple tree visualization using CSS flexbox
+      var treeContainer = document.createElement('div');
+      treeContainer.style.display = 'flex';
+      treeContainer.style.flexDirection = 'column';
+      treeContainer.style.alignItems = 'center';
+      treeContainer.style.padding = '20px';
+      treeContainer.style.fontFamily = 'Arial, sans-serif';
+
+      function createNode(node, isRoot = false) {
+        var nodeDiv = document.createElement('div');
+        nodeDiv.style.display = 'inline-block';
+        nodeDiv.style.padding = '12px 16px';
+        nodeDiv.style.margin = '8px';
+        nodeDiv.style.border = '2px solid #888';
+        nodeDiv.style.borderRadius = '8px';
+        nodeDiv.style.textAlign = 'center';
+        nodeDiv.style.backgroundColor = 'white';
+        nodeDiv.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+        nodeDiv.style.position = 'relative';
+        nodeDiv.style.minWidth = '150px';
+        nodeDiv.style.fontSize = isRoot ? '14px' : '12px';
+        nodeDiv.style.fontWeight = isRoot ? 'bold' : 'normal';
 
         // Color coding by type
         if (node.type === 'entity') {
-          div.style.background = '#e3f2fd';
-          div.style.borderColor = '#2196f3';
+          nodeDiv.style.backgroundColor = '#e3f2fd';
+          nodeDiv.style.borderColor = '#2196f3';
         } else if (node.type === 'automation') {
-          div.style.background = '#fffde7';
-          div.style.borderColor = '#ff9800';
+          nodeDiv.style.backgroundColor = '#fffde7';
+          nodeDiv.style.borderColor = '#ff9800';
         } else if (node.type === 'script') {
-          div.style.background = '#e8f5e9';
-          div.style.borderColor = '#4caf50';
+          nodeDiv.style.backgroundColor = '#e8f5e9';
+          nodeDiv.style.borderColor = '#4caf50';
         }
 
-        // Add relationship indicator if present
+        // Add relationship badge
         if (node.relationship) {
-          var relationshipBadge = document.createElement('div');
-          relationshipBadge.style.position = 'absolute';
-          relationshipBadge.style.top = '-8px';
-          relationshipBadge.style.right = '-8px';
-          relationshipBadge.style.padding = '2px 6px';
-          relationshipBadge.style.fontSize = '10px';
-          relationshipBadge.style.borderRadius = '10px';
-          relationshipBadge.style.fontWeight = 'bold';
-          relationshipBadge.style.color = 'white';
+          var badge = document.createElement('div');
+          badge.style.position = 'absolute';
+          badge.style.top = '-8px';
+          badge.style.right = '-8px';
+          badge.style.padding = '2px 6px';
+          badge.style.fontSize = '9px';
+          badge.style.borderRadius = '10px';
+          badge.style.fontWeight = 'bold';
+          badge.style.color = 'white';
+          badge.style.zIndex = '10';
 
           if (node.relationship === 'trigger') {
-            relationshipBadge.style.background = '#f44336';
-            relationshipBadge.textContent = 'TRIGGER';
+            badge.style.backgroundColor = '#f44336';
+            badge.textContent = 'T';
           } else if (node.relationship === 'condition') {
-            relationshipBadge.style.background = '#ff9800';
-            relationshipBadge.textContent = 'CONDITION';
+            badge.style.backgroundColor = '#ff9800';
+            badge.textContent = 'C';
           } else if (node.relationship === 'output') {
-            relationshipBadge.style.background = '#4caf50';
-            relationshipBadge.textContent = 'OUTPUT';
+            badge.style.backgroundColor = '#4caf50';
+            badge.textContent = 'O';
           }
 
-          div.appendChild(relationshipBadge);
+          nodeDiv.appendChild(badge);
         }
 
-        // Add reference indicator
+        // Add reference indicator for cycles
         if (node.is_reference) {
-          div.style.opacity = '0.6';
-          div.style.borderStyle = 'dashed';
+          nodeDiv.style.opacity = '0.7';
+          nodeDiv.style.borderStyle = 'dashed';
+          nodeDiv.title = 'Circular reference - already shown above';
         }
 
         var label = document.createElement('div');
-        label.textContent = node.label;
-        label.style.wordWrap = 'break-word';
-        div.appendChild(label);
+        label.textContent = node.label.length > 30 ? node.label.substring(0, 30) + '...' : node.label;
+        label.title = node.label; // Full text on hover
+        nodeDiv.appendChild(label);
 
-        return div;
+        return nodeDiv;
       }
 
-      function renderBranch(node, parentDiv, depth = 0) {
-        var nodeDiv = createNode(node);
-        parentDiv.appendChild(nodeDiv);
+      function createTreeLevel(nodes, level = 0, visited = new Set()) {
+        if (!nodes || nodes.length === 0 || level >= 5) return null;
 
-        if (node.children && node.children.length && depth < 6) {
-          // Group children by relationship type
-          var triggers = node.children.filter(child => child.relationship === 'trigger');
-          var conditions = node.children.filter(child => child.relationship === 'condition');
-          var outputs = node.children.filter(child => child.relationship === 'output');
-          var others = node.children.filter(child => !child.relationship);
+        var levelDiv = document.createElement('div');
+        levelDiv.style.display = 'flex';
+        levelDiv.style.flexWrap = 'wrap';
+        levelDiv.style.justifyContent = 'center';
+        levelDiv.style.gap = '20px';
+        levelDiv.style.marginTop = level > 0 ? '30px' : '0';
 
-          var allGroups = [];
-          if (triggers.length > 0) allGroups.push({title: 'Triggers', children: triggers, color: '#ffebee'});
-          if (conditions.length > 0) allGroups.push({title: 'Conditions', children: conditions, color: '#fff3e0'});
-          if (outputs.length > 0) allGroups.push({title: 'Outputs', children: outputs, color: '#e8f5e9'});
-          if (others.length > 0) allGroups.push({title: 'Related', children: others, color: '#f5f5f5'});
-
-          if (allGroups.length > 0) {
-            var groupsContainer = document.createElement('div');
-            groupsContainer.style.display = 'flex';
-            groupsContainer.style.flexDirection = 'column';
-            groupsContainer.style.gap = '20px';
-            groupsContainer.style.marginTop = '20px';
-
-            allGroups.forEach(function(group) {
-              if (group.children.length === 0) return;
-
-              var groupDiv = document.createElement('div');
-              groupDiv.style.border = '1px solid #ddd';
-              groupDiv.style.borderRadius = '8px';
-              groupDiv.style.padding = '15px';
-              groupDiv.style.background = group.color;
-
-              var groupTitle = document.createElement('div');
-              groupTitle.textContent = group.title;
-              groupTitle.style.fontWeight = 'bold';
-              groupTitle.style.marginBottom = '10px';
-              groupTitle.style.fontSize = '14px';
-              groupTitle.style.color = '#333';
-              groupDiv.appendChild(groupTitle);
-
-              var childrenContainer = document.createElement('div');
-              childrenContainer.style.display = 'flex';
-              childrenContainer.style.flexWrap = 'wrap';
-              childrenContainer.style.gap = '10px';
-              childrenContainer.style.justifyContent = 'center';
-
-              group.children.forEach(function(child) {
-                var childWrapper = document.createElement('div');
-                childWrapper.style.flex = '1';
-                childWrapper.style.minWidth = '200px';
-                childWrapper.style.maxWidth = '300px';
-                renderBranch(child, childWrapper, depth + 1);
-                childrenContainer.appendChild(childWrapper);
-              });
-
-              groupDiv.appendChild(childrenContainer);
-              groupsContainer.appendChild(groupDiv);
-            });
-
-            parentDiv.appendChild(groupsContainer);
-          }
+        // Add connecting line from parent level
+        if (level > 0) {
+          var connector = document.createElement('div');
+          connector.style.width = '2px';
+          connector.style.height = '20px';
+          connector.style.backgroundColor = '#666';
+          connector.style.margin = '0 auto 10px auto';
+          levelDiv.appendChild(connector);
         }
+
+        var nodeContainer = document.createElement('div');
+        nodeContainer.style.display = 'flex';
+        nodeContainer.style.flexWrap = 'wrap';
+        nodeContainer.style.justifyContent = 'center';
+        nodeContainer.style.gap = '20px';
+
+        nodes.forEach(function(node) {
+          var nodeKey = node.type + ':' + (node.id || node.label);
+
+          var nodeElement = createNode(node, level === 0);
+
+          if (visited.has(nodeKey) && level > 0) {
+            // Mark as reference but still show it
+            node.is_reference = true;
+            nodeElement = createNode(node, false);
+          } else {
+            visited.add(nodeKey);
+          }
+
+          var nodeWrapper = document.createElement('div');
+          nodeWrapper.style.display = 'flex';
+          nodeWrapper.style.flexDirection = 'column';
+          nodeWrapper.style.alignItems = 'center';
+
+          nodeWrapper.appendChild(nodeElement);
+
+          // Add children recursively if not a reference and has children
+          if (!node.is_reference && node.children && node.children.length > 0) {
+            var childLevel = createTreeLevel(node.children, level + 1, new Set(visited));
+            if (childLevel) {
+              nodeWrapper.appendChild(childLevel);
+            }
+          }
+
+          nodeContainer.appendChild(nodeWrapper);
+        });
+
+        levelDiv.appendChild(nodeContainer);
+        return levelDiv;
       }
 
-      var rootDiv = document.createElement('div');
-      rootDiv.style.display = 'flex';
-      rootDiv.style.flexDirection = 'column';
-      rootDiv.style.alignItems = 'center';
-      rootDiv.style.padding = '20px';
+      var rootLevel = createTreeLevel([data.root], 0);
+      if (rootLevel) {
+        treeContainer.appendChild(rootLevel);
+      }
 
-      renderBranch(data.root, rootDiv);
-      container.appendChild(rootDiv);
+      container.appendChild(treeContainer);
     }
 
     function fetchAndShowFlow(type, id) {
