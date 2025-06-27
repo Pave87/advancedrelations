@@ -284,17 +284,72 @@
           nodeWrapper.style.flexDirection = 'column';
           nodeWrapper.style.alignItems = 'center';
 
-          nodeWrapper.appendChild(nodeElement);
+          // Add visual grouping for automations and scripts that have direct children
+          if ((node.type === 'automation' || node.type === 'script') && node.children && node.children.length > 0 && !node.is_reference) {
+            nodeWrapper.style.border = '2px dashed ' + (node.type === 'automation' ? '#ff9800' : '#4caf50');
+            nodeWrapper.style.borderRadius = '12px';
+            nodeWrapper.style.padding = '15px';
+            nodeWrapper.style.margin = '5px';
+            nodeWrapper.style.backgroundColor = node.type === 'automation' ? 'rgba(255, 152, 0, 0.05)' : 'rgba(76, 175, 80, 0.05)';
+          }
 
-          // Add children recursively if not a reference and has children
+          nodeWrapper.appendChild(nodeElement);          // Add only direct children (level + 1) if not a reference and has children
           if (!node.is_reference && node.children && node.children.length > 0) {
-            var childLevel = createTreeLevel(node.children, level + 1, new Set(visited));
-            if (childLevel) {
-              nodeWrapper.appendChild(childLevel);
+            // For automations/scripts with visual grouping, only include LEAF entities (entities with no automation/script children)
+            if ((node.type === 'automation' || node.type === 'script') && node.children && node.children.length > 0 && !node.is_reference) {
+              // Only entities that don't lead to other automations/scripts
+              var leafEntities = node.children.filter(function(child) {
+                if (child.type !== 'entity') return false;
+                // Check if this entity has automation/script children
+                if (!child.children || child.children.length === 0) return true;
+                var hasAutomationScriptChildren = child.children.some(function(grandchild) {
+                  return grandchild.type === 'automation' || grandchild.type === 'script';
+                });
+                return !hasAutomationScriptChildren;
+              });
+
+              // All other children (entities with automation/script children, and direct automation/script children)
+              var otherChildren = node.children.filter(function(child) {
+                if (child.type === 'automation' || child.type === 'script') return true;
+                if (child.type === 'entity' && child.children && child.children.length > 0) {
+                  var hasAutomationScriptChildren = child.children.some(function(grandchild) {
+                    return grandchild.type === 'automation' || grandchild.type === 'script';
+                  });
+                  return hasAutomationScriptChildren;
+                }
+                return false;
+              });
+
+              // Add leaf entities inside the box
+              if (leafEntities.length > 0) {
+                var entityLevel = createTreeLevel(leafEntities, level + 1, new Set(visited));
+                if (entityLevel) {
+                  nodeWrapper.appendChild(entityLevel);
+                }
+              }
+
+              // Add other children outside the box
+              if (otherChildren.length > 0) {
+                var otherLevel = createTreeLevel(otherChildren, level + 1, new Set(visited));
+                if (otherLevel) {
+                  nodeWrapper._indirectChildren = otherLevel;
+                }
+              }
+            } else {
+              // For entities and other cases, show all children normally
+              var childLevel = createTreeLevel(node.children, level + 1, new Set(visited));
+              if (childLevel) {
+                nodeWrapper.appendChild(childLevel);
+              }
             }
           }
 
           nodeContainer.appendChild(nodeWrapper);
+
+          // Add indirect children (other automations/scripts) after the wrapped node
+          if (nodeWrapper._indirectChildren) {
+            nodeContainer.appendChild(nodeWrapper._indirectChildren);
+          }
         });
 
         levelDiv.appendChild(nodeContainer);
