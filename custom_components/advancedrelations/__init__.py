@@ -183,6 +183,13 @@ class RelationsTreeBuilder:
         self._automations_data = None
         self._scripts_data = None
 
+    def _safe_get_list(self, data, key, default=None):
+        """Safely get a list from dict, handling None values."""
+        if default is None:
+            default = []
+        value = data.get(key, default)
+        return value if value is not None else default
+
     def get_automations_data(self):
         """Get cached automations data."""
         if self._automations_data is None:
@@ -341,28 +348,21 @@ class RelationsTreeBuilder:
                         for cond in choice.get("conditions", []):
                             conditions.update(self.extract_entities_from_value(cond))
                         # Recursively check sequence actions
-                        sequence = choice.get("sequence", [])
-                        if sequence is not None:
-                            for seq_action in sequence:
-                                conditions.update(
-                                    self.find_conditions_in_action_block(seq_action)
-                                )
+                        sequence = self._safe_get_list(choice, "sequence")
+                        for seq_action in sequence:
+                            conditions.update(
+                                self.find_conditions_in_action_block(seq_action)
+                            )
 
             # Check if blocks
             if "if" in action:
                 conditions.update(self.extract_entities_from_value(action["if"]))
-                then_actions = action.get("then", [])
-                if then_actions is not None:
-                    for seq_action in then_actions:
-                        conditions.update(
-                            self.find_conditions_in_action_block(seq_action)
-                        )
-                else_actions = action.get("else", [])
-                if else_actions is not None:
-                    for seq_action in else_actions:
-                        conditions.update(
-                            self.find_conditions_in_action_block(seq_action)
-                        )
+                then_actions = self._safe_get_list(action, "then")
+                for seq_action in then_actions:
+                    conditions.update(self.find_conditions_in_action_block(seq_action))
+                else_actions = self._safe_get_list(action, "else")
+                for seq_action in else_actions:
+                    conditions.update(self.find_conditions_in_action_block(seq_action))
 
             # Check repeat blocks
             if "repeat" in action:
@@ -374,12 +374,11 @@ class RelationsTreeBuilder:
                     conditions.update(
                         self.extract_entities_from_value(repeat_block.get("while", {}))
                     )
-                    sequence = repeat_block.get("sequence", [])
-                    if sequence is not None:
-                        for seq_action in sequence:
-                            conditions.update(
-                                self.find_conditions_in_action_block(seq_action)
-                            )
+                    sequence = self._safe_get_list(repeat_block, "sequence")
+                    for seq_action in sequence:
+                        conditions.update(
+                            self.find_conditions_in_action_block(seq_action)
+                        )
 
         return conditions
 
@@ -442,7 +441,9 @@ class RelationsTreeBuilder:
                                 for eid in entity_ids:
                                     outputs.add(f"script_call:{eid}")
                         if "target" in action and isinstance(action["target"], dict):
-                            target_entities = action["target"].get("entity_id", [])
+                            target_entities = self._safe_get_list(
+                                action["target"], "entity_id"
+                            )
                             if isinstance(target_entities, str):
                                 outputs.add(f"script_call:{target_entities}")
                             elif isinstance(target_entities, list):
@@ -459,21 +460,21 @@ class RelationsTreeBuilder:
             if "choose" in action:
                 for choice in action["choose"]:
                     if isinstance(choice, dict):
-                        for seq_action in choice.get("sequence", []):
+                        for seq_action in self._safe_get_list(choice, "sequence"):
                             outputs.update(
                                 self.find_outputs_in_action_block(seq_action)
                             )
 
             if "if" in action:
-                for seq_action in action.get("then", []):
+                for seq_action in self._safe_get_list(action, "then"):
                     outputs.update(self.find_outputs_in_action_block(seq_action))
-                for seq_action in action.get("else", []):
+                for seq_action in self._safe_get_list(action, "else"):
                     outputs.update(self.find_outputs_in_action_block(seq_action))
 
             if "repeat" in action:
                 repeat_block = action["repeat"]
                 if isinstance(repeat_block, dict):
-                    for seq_action in repeat_block.get("sequence", []):
+                    for seq_action in self._safe_get_list(repeat_block, "sequence"):
                         outputs.update(self.find_outputs_in_action_block(seq_action))
 
         return outputs
@@ -481,7 +482,7 @@ class RelationsTreeBuilder:
     def find_conditions_in_script(self, script):
         """Find all condition entities in a script."""
         conditions = set()
-        for step in script.get("sequence", []):
+        for step in self._safe_get_list(script, "sequence"):
             if isinstance(step, dict):
                 conditions.update(self.find_conditions_in_action_block(step))
         return conditions
@@ -489,7 +490,7 @@ class RelationsTreeBuilder:
     def find_outputs_in_script(self, script):
         """Find all output entities in a script."""
         outputs = set()
-        for step in script.get("sequence", []):
+        for step in self._safe_get_list(script, "sequence"):
             if isinstance(step, dict):
                 outputs.update(self.find_outputs_in_action_block(step))
         return outputs
