@@ -921,41 +921,17 @@ class RelationsTreeBuilder:
         """Recursively find outputs in action blocks."""
         outputs = set()
         if isinstance(action, dict):
-            # Services that modify entities - check for any service call
+            # Check for service calls
             service_actions = ["service", "action"]
             for service_key in service_actions:
                 if service_key in action:
                     service = action[service_key]
-                    # Instead of filtering by keywords, assume ANY service call with entity_id/target affects those entities
-                    # This is more comprehensive and covers all Home Assistant services
-                    outputs.update(
-                        self.extract_entities_from_value(action.get("entity_id", []))
-                    )
-                    outputs.update(
-                        self.extract_entities_from_value(action.get("target", {}))
-                    )
-
-                    # Handle script and automation calls specially
                     service_str = str(service).lower()
-                    if "script." in service_str or "automation." in service_str:
-                        if "entity_id" in action:
-                            entity_ids = action["entity_id"]
-                            if isinstance(entity_ids, str):
-                                outputs.add(f"script_call:{entity_ids}")
-                            elif isinstance(entity_ids, list):
-                                for eid in entity_ids:
-                                    outputs.add(f"script_call:{eid}")
-                        if "target" in action and isinstance(action["target"], dict):
-                            target_entities = self._safe_get_list(
-                                action["target"], "entity_id"
-                            )
-                            if isinstance(target_entities, str):
-                                outputs.add(f"script_call:{target_entities}")
-                            elif isinstance(target_entities, list):
-                                for eid in target_entities:
-                                    outputs.add(f"script_call:{eid}")
 
-            # Direct entity_id assignments (for any service call)
+                    # Detect script and automation calls
+                    self._detect_script_automation_calls(action, service_str, outputs)
+
+            # Always add direct entity_id and target entities as outputs
             outputs.update(
                 self.extract_entities_from_value(action.get("entity_id", []))
             )
@@ -1754,3 +1730,57 @@ class RelationsTreeBuilder:
 
         else:
             return {"error": f"Unknown item type: {item_type}"}
+
+    def _detect_script_automation_calls(self, action, service_str, outputs):
+        """Detect script and automation calls in action and add them to outputs."""
+        # Direct service calls to specific scripts/automations (e.g., "script.my_script")
+        if service_str.startswith("script.") and service_str not in [
+            "script.turn_on",
+            "script.turn_off",
+            "script.toggle",
+            "script.reload",
+        ]:
+            script_name = service_str[7:]  # Remove "script." prefix
+            outputs.add(f"script_call:{script_name}")
+
+        elif service_str.startswith("automation.") and service_str not in [
+            "automation.trigger",
+            "automation.turn_on",
+            "automation.turn_off",
+            "automation.toggle",
+            "automation.reload",
+        ]:
+            automation_name = service_str[11:]  # Remove "automation." prefix
+            outputs.add(f"automation_call:{automation_name}")
+
+        # Check entity_id field for script/automation entities
+        if "entity_id" in action:
+            entity_ids = action["entity_id"]
+            if isinstance(entity_ids, str):
+                if entity_ids.startswith("script."):
+                    outputs.add(f"script_call:{entity_ids[7:]}")
+                elif entity_ids.startswith("automation."):
+                    outputs.add(f"automation_call:{entity_ids[11:]}")
+            elif isinstance(entity_ids, list):
+                for eid in entity_ids:
+                    if isinstance(eid, str):
+                        if eid.startswith("script."):
+                            outputs.add(f"script_call:{eid[7:]}")
+                        elif eid.startswith("automation."):
+                            outputs.add(f"automation_call:{eid[11:]}")
+
+        # Check target field for script/automation entities
+        if "target" in action and isinstance(action["target"], dict):
+            target_entities = self._safe_get_list(action["target"], "entity_id")
+            if isinstance(target_entities, str):
+                if target_entities.startswith("script."):
+                    outputs.add(f"script_call:{target_entities[7:]}")
+                elif target_entities.startswith("automation."):
+                    outputs.add(f"automation_call:{target_entities[11:]}")
+            elif isinstance(target_entities, list):
+                for eid in target_entities:
+                    if isinstance(eid, str):
+                        if eid.startswith("script."):
+                            outputs.add(f"script_call:{eid[7:]}")
+                        elif eid.startswith("automation."):
+                            outputs.add(f"automation_call:{eid[11:]}")
