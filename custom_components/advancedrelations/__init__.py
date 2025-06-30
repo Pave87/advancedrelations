@@ -487,16 +487,10 @@ class AdvancedRelationsRelatedView(HomeAssistantView):
             # Create relationship tree builder and analyze the specified item
             builder = RelationsTreeBuilder(hass)
 
-            if q_type == "entity":
-                # For entities, find upstream relationships (what uses this entity)
-                relations = builder.find_entity_upstream_relations(
-                    q_id, max_depth=depth
-                )
-            else:
-                # For automations/scripts, find downstream relationships (what they affect)
-                relations = builder.find_automation_script_downstream_relations(
-                    q_type, q_id, max_depth=depth
-                )
+            # Get comprehensive relationships (both upstream and downstream)
+            relations = builder.find_comprehensive_relations(
+                q_type, q_id, max_depth=depth
+            )
 
             # Return the new relationship structure
             return self.json({"relations": relations})
@@ -1730,6 +1724,423 @@ class RelationsTreeBuilder:
 
         else:
             return {"error": f"Unknown item type: {item_type}"}
+
+    def find_comprehensive_relations(self, item_type, item_id, max_depth=3):
+        """Find comprehensive relationships for any item type - both upstream and downstream.
+
+        This method provides a complete view of relationships for entities, automations, and scripts,
+        showing both what affects them (upstream) and what they affect (downstream).
+
+        Args:
+            item_type (str): Type of item ('entity', 'automation', 'script')
+            item_id (str): The ID of the item to analyze
+            max_depth (int): Maximum depth for recursive analysis
+
+        Returns:
+            dict: Comprehensive relations data with upstream and downstream sections:
+            {
+                "item_type": str,
+                "item_id": str,
+                "friendly_name": str,
+                "upstream": {...},  # What affects this item
+                "downstream": {...} # What this item affects
+            }
+
+        """
+        base_info = {
+            "item_type": item_type,
+            "item_id": item_id,
+            "friendly_name": self._get_item_label(item_type, item_id),
+        }
+
+        if item_type == "entity":
+            # For entities: upstream = what this entity triggers/affects when it changes
+            #               downstream = what can cause this entity to change
+            upstream = self._find_entity_upstream_relations_only(item_id, max_depth)
+            downstream = self._find_entity_downstream_relations(
+                item_id, max_depth, set()
+            )
+
+            return {
+                **base_info,
+                "upstream": {
+                    "used_as_trigger_by": upstream["trigger_in"],
+                    "used_as_condition_by": upstream["condition_in"],
+                },
+                "downstream": {
+                    "output_by": downstream["output_by"],
+                },
+            }
+
+        if item_type in ["automation", "script"]:
+            # For automations/scripts: upstream = what triggers this automation/script
+            #                         downstream = what this automation/script affects
+            upstream = self._find_automation_script_upstream_relations(
+                item_type, item_id, max_depth
+            )
+            downstream_details = self.find_automation_script_downstream_relations(
+                item_type, item_id, max_depth
+            )
+
+            return {
+                **base_info,
+                "upstream": upstream,
+                "downstream": {
+                    "triggers": downstream_details.get("triggers", []),
+                    "conditions": downstream_details.get("conditions", []),
+                    "outputs": downstream_details.get("outputs", []),
+                },
+            }
+
+        return {"error": f"Unknown item type: {item_type}"}
+
+    def _find_entity_upstream_relations_only(
+        self, entity_id, max_depth=3, visited=None
+    ):
+        """Find only upstream relationships for an entity (simplified version)."""
+        if visited is None:
+            visited = set()
+
+        if entity_id in visited or max_depth <= 0:
+            return {"trigger_in": [], "condition_in": []}
+
+        visited.add(entity_id)
+
+        relations = {"trigger_in": [], "condition_in": []}
+
+        # Check automations
+        for automation in self.get_automations_data():
+            auto_id = str(automation.get("id", ""))
+            if not auto_id:
+                continue
+
+            triggers = self.find_triggers_in_automation(automation)
+            conditions = self.find_conditions_in_automation(automation)
+
+            if entity_id in triggers:
+                automation_details = self._get_automation_details(
+                    automation, auto_id, max_depth - 1, visited.copy()
+                )
+                relations["trigger_in"].append(automation_details)
+
+            if entity_id in conditions:
+                automation_details = self._get_automation_details(
+                    automation, auto_id, max_depth - 1, visited.copy()
+                )
+                relations["condition_in"].append(automation_details)
+
+        # Check scripts
+        scripts_data = self.get_scripts_data()
+        for script_id, script in scripts_data.items():
+            conditions = self.find_conditions_in_script(script)
+
+            if entity_id in conditions:
+                script_details = self._get_script_details(
+                    script, script_id, max_depth - 1, visited.copy()
+                )
+                relations["condition_in"].append(script_details)
+
+        return relations
+
+    def _find_entity_downstream_relations(self, entity_id, max_depth=3, visited=None):
+        """Find downstream relationships for an entity (what can cause this entity to change).
+
+        For entities, downstream means: what automations/scripts OUTPUT this entity?
+        This shows what can cause this entity to change its state.
+        Follow the recursive chain backwards to show the full path.
+        """
+        if visited is None:
+            visited = set()
+
+        if entity_id in visited or max_depth <= 0:
+            return {"output_by": []}
+
+        visited.add(entity_id)
+        downstream = {"output_by": []}
+
+        # Check automations that output this entity
+        for automation in self.get_automations_data():
+            auto_id = str(automation.get("id", ""))
+            if not auto_id:
+                continue
+
+            outputs = self.find_outputs_in_automation(automation)
+
+            if entity_id in outputs:
+                # Get detailed automation with recursive downstream for its triggers/conditions
+                automation_details = self._get_automation_details_with_downstream(
+                    automation, auto_id, max_depth - 1, visited.copy()
+                )
+                downstream["output_by"].append(automation_details)
+
+        # Check scripts that output this entity
+        scripts_data = self.get_scripts_data()
+        for script_id, script in scripts_data.items():
+            outputs = self.find_outputs_in_script(script)
+
+            if entity_id in outputs:
+                # Get detailed script with recursive downstream for its conditions
+                script_details = self._get_script_details_with_downstream(
+                    script, script_id, max_depth - 1, visited.copy()
+                )
+                downstream["output_by"].append(script_details)
+
+        return downstream
+
+    def _get_automation_details_with_downstream(
+        self, automation, automation_id, max_depth, visited
+    ):
+        """Get automation details with downstream relationships for triggers/conditions."""
+        triggers = []
+        conditions = []
+        outputs = []
+
+        # Find trigger entities and their downstream
+        trigger_entities = self.find_triggers_in_automation(automation)
+        for entity_id in trigger_entities:
+            if not entity_id.startswith("script_call:"):
+                entity_info = {
+                    "type": "entity",
+                    "entity_id": entity_id,
+                    "friendly_name": self.get_entity_friendly_name(entity_id),
+                }
+                # Add downstream relationships for this trigger entity
+                if max_depth > 0 and entity_id not in visited:
+                    entity_downstream = self._find_entity_downstream_relations(
+                        entity_id, max_depth, visited.copy()
+                    )
+                    entity_info["downstream"] = entity_downstream
+                else:
+                    entity_info["downstream"] = {"output_by": []}
+                triggers.append(entity_info)
+
+        # Find condition entities and their downstream
+        condition_entities = self.find_conditions_in_automation(automation)
+        for entity_id in condition_entities:
+            if not entity_id.startswith("script_call:"):
+                entity_info = {
+                    "type": "entity",
+                    "entity_id": entity_id,
+                    "friendly_name": self.get_entity_friendly_name(entity_id),
+                }
+                # Add downstream relationships for this condition entity
+                if max_depth > 0 and entity_id not in visited:
+                    entity_downstream = self._find_entity_downstream_relations(
+                        entity_id, max_depth, visited.copy()
+                    )
+                    entity_info["downstream"] = entity_downstream
+                else:
+                    entity_info["downstream"] = {"output_by": []}
+                conditions.append(entity_info)
+
+        # Find outputs (basic, no downstream for outputs in downstream context)
+        output_entities = self.find_outputs_in_automation(automation)
+        for entity_id in output_entities:
+            if entity_id.startswith("script_call:"):
+                called_item = entity_id.replace("script_call:", "")
+                if called_item.startswith("script."):
+                    called_script_id = called_item.replace("script.", "")
+                    outputs.append(
+                        {
+                            "type": "script",
+                            "id": called_script_id,
+                            "name": f"Script: {called_script_id}",
+                        }
+                    )
+                elif called_item.startswith("automation."):
+                    called_auto_id = called_item.replace("automation.", "")
+                    outputs.append(
+                        {
+                            "type": "automation",
+                            "id": called_auto_id,
+                            "name": f"Automation: {called_auto_id}",
+                        }
+                    )
+                else:
+                    outputs.append(
+                        {
+                            "type": "script",
+                            "id": called_item,
+                            "name": f"Script: {called_item}",
+                        }
+                    )
+            else:
+                outputs.append(
+                    {
+                        "type": "entity",
+                        "entity_id": entity_id,
+                        "friendly_name": self.get_entity_friendly_name(entity_id),
+                    }
+                )
+
+        return {
+            "type": "automation",
+            "id": automation_id,
+            "name": self.get_automation_label(automation),
+            "triggers": triggers,
+            "conditions": conditions,
+            "outputs": outputs,
+        }
+
+    def _get_script_details_with_downstream(
+        self, script, script_id, max_depth, visited
+    ):
+        """Get script details with downstream relationships for conditions."""
+        conditions = []
+        outputs = []
+
+        # Find condition entities and their downstream
+        condition_entities = self.find_conditions_in_script(script)
+        for entity_id in condition_entities:
+            if not entity_id.startswith("script_call:"):
+                entity_info = {
+                    "type": "entity",
+                    "entity_id": entity_id,
+                    "friendly_name": self.get_entity_friendly_name(entity_id),
+                }
+                # Add downstream relationships for this condition entity
+                if max_depth > 0 and entity_id not in visited:
+                    entity_downstream = self._find_entity_downstream_relations(
+                        entity_id, max_depth, visited.copy()
+                    )
+                    entity_info["downstream"] = entity_downstream
+                else:
+                    entity_info["downstream"] = {"output_by": []}
+                conditions.append(entity_info)
+
+        # Find outputs (basic, no downstream for outputs in downstream context)
+        output_entities = self.find_outputs_in_script(script)
+        for entity_id in output_entities:
+            if entity_id.startswith("script_call:"):
+                called_item = entity_id.replace("script_call:", "")
+                if called_item.startswith("script."):
+                    called_script_id = called_item.replace("script.", "")
+                    outputs.append(
+                        {
+                            "type": "script",
+                            "id": called_script_id,
+                            "name": f"Script: {called_script_id}",
+                        }
+                    )
+                elif called_item.startswith("automation."):
+                    called_auto_id = called_item.replace("automation.", "")
+                    outputs.append(
+                        {
+                            "type": "automation",
+                            "id": called_auto_id,
+                            "name": f"Automation: {called_auto_id}",
+                        }
+                    )
+                else:
+                    outputs.append(
+                        {
+                            "type": "script",
+                            "id": called_item,
+                            "name": f"Script: {called_item}",
+                        }
+                    )
+            else:
+                outputs.append(
+                    {
+                        "type": "entity",
+                        "entity_id": entity_id,
+                        "friendly_name": self.get_entity_friendly_name(entity_id),
+                    }
+                )
+
+        return {
+            "type": "script",
+            "id": script_id,
+            "name": self.get_script_label(script_id, script),
+            "triggers": [],  # Scripts don't have triggers
+            "conditions": conditions,
+            "outputs": outputs,
+        }
+
+    def _find_automation_script_upstream_relations(
+        self, item_type, item_id, max_depth=3
+    ):
+        """Find what triggers/calls this automation or script."""
+        upstream = {"triggered_by": [], "called_by": []}
+
+        if item_type == "automation":
+            # Find automations that call this automation
+            for automation in self.get_automations_data():
+                auto_id = str(automation.get("id", ""))
+                if auto_id != item_id and auto_id:
+                    outputs = self.find_outputs_in_automation(automation)
+                    automation_calls = [
+                        f"script_call:automation.{item_id}",
+                        f"automation_call:{item_id}",
+                        f"automation.{item_id}",
+                    ]
+                    if any(call in outputs for call in automation_calls):
+                        upstream["called_by"].append(
+                            {
+                                "type": "automation",
+                                "id": auto_id,
+                                "name": self.get_automation_label(automation),
+                            }
+                        )
+
+            # Find scripts that call this automation
+            scripts_data = self.get_scripts_data()
+            for script_id, script in scripts_data.items():
+                outputs = self.find_outputs_in_script(script)
+                automation_calls = [
+                    f"script_call:automation.{item_id}",
+                    f"automation_call:{item_id}",
+                    f"automation.{item_id}",
+                ]
+                if any(call in outputs for call in automation_calls):
+                    upstream["called_by"].append(
+                        {
+                            "type": "script",
+                            "id": script_id,
+                            "name": self.get_script_label(script_id, script),
+                        }
+                    )
+
+        elif item_type == "script":
+            # Find automations that call this script
+            for automation in self.get_automations_data():
+                auto_id = str(automation.get("id", ""))
+                if auto_id:
+                    outputs = self.find_outputs_in_automation(automation)
+                    script_calls = [
+                        f"script_call:script.{item_id}",
+                        f"script_call:{item_id}",
+                        f"script.{item_id}",
+                    ]
+                    if any(call in outputs for call in script_calls):
+                        upstream["called_by"].append(
+                            {
+                                "type": "automation",
+                                "id": auto_id,
+                                "name": self.get_automation_label(automation),
+                            }
+                        )
+
+            # Find scripts that call this script
+            scripts_data = self.get_scripts_data()
+            for script_id, script in scripts_data.items():
+                if script_id != item_id:
+                    outputs = self.find_outputs_in_script(script)
+                    script_calls = [
+                        f"script_call:script.{item_id}",
+                        f"script_call:{item_id}",
+                        f"script.{item_id}",
+                    ]
+                    if any(call in outputs for call in script_calls):
+                        upstream["called_by"].append(
+                            {
+                                "type": "script",
+                                "id": script_id,
+                                "name": self.get_script_label(script_id, script),
+                            }
+                        )
+
+        return upstream
 
     def _detect_script_automation_calls(self, action, service_str, outputs):
         """Detect script and automation calls in action and add them to outputs."""
