@@ -809,7 +809,7 @@ class RelationsTreeBuilder:
         return entities
 
     def find_triggers_in_automation(self, automation):
-        """Find all trigger entities in an automation."""
+        """Find all trigger entities and trigger identifiers in an automation."""
         triggers = set()
         for trigger_list in [
             automation.get("trigger", []),
@@ -819,7 +819,52 @@ class RelationsTreeBuilder:
                 trigger_list if isinstance(trigger_list, list) else [trigger_list]
             ):
                 if isinstance(trig, dict):
+                    # Extract entity-based triggers
                     triggers.update(self.extract_entities_from_value(trig))
+
+                    # Extract non-entity triggers
+                    platform = trig.get("platform", trig.get("trigger", ""))
+                    if platform == "time" and "at" in trig:
+                        triggers.add(f"time_trigger:at_{trig['at']}")
+                    elif platform == "time_pattern":
+                        pattern_parts = [
+                            f"{key}={trig[key]}"
+                            for key in ["hours", "minutes", "seconds"]
+                            if key in trig
+                        ]
+                        if pattern_parts:
+                            triggers.add(
+                                f"time_pattern_trigger:{','.join(pattern_parts)}"
+                            )
+                    elif platform == "sun":
+                        event = trig.get("event", "")
+                        if event:
+                            trigger_id = f"sun_trigger:{event}"
+                            if "offset" in trig:
+                                trigger_id += f"_offset_{trig['offset']}"
+                            triggers.add(trigger_id)
+                    elif platform == "event" and "event_type" in trig:
+                        triggers.add(f"event_trigger:{trig['event_type']}")
+                    elif platform == "mqtt" and "topic" in trig:
+                        triggers.add(f"mqtt_trigger:{trig['topic']}")
+                    elif platform == "webhook" and "webhook_id" in trig:
+                        triggers.add(f"webhook_trigger:{trig['webhook_id']}")
+                    elif (
+                        platform == "device" and "device_id" in trig and "type" in trig
+                    ):
+                        triggers.add(
+                            f"device_trigger:{trig['device_id']}_{trig['type']}"
+                        )
+                    elif platform == "tag" and "tag_id" in trig:
+                        triggers.add(f"tag_trigger:{trig['tag_id']}")
+                    elif platform == "homeassistant" and "event" in trig:
+                        triggers.add(f"homeassistant_trigger:{trig['event']}")
+                    elif platform == "calendar" and "event" in trig:
+                        triggers.add(f"calendar_trigger:{trig['event']}")
+                    elif platform == "template" and "value_template" in trig:
+                        triggers.add(
+                            f"template_trigger:{hash(str(trig['value_template']))}"
+                        )
         return triggers
 
     def find_conditions_in_automation(self, automation):
