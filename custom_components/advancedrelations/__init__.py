@@ -653,43 +653,45 @@ class RelationsTreeBuilder:
     def get_automation_label(self, automation):
         """Generate a human-readable label for an automation.
 
-        Creates a descriptive label combining the automation's alias and ID for
-        display in the relationship tree. This helps users identify automations
-        even when they have generic aliases.
+        Creates a descriptive label using the automation's alias if available,
+        otherwise falls back to the ID.
 
         Args:
             automation (dict): Automation configuration dictionary containing 'alias' and 'id' keys
 
         Returns:
-            str: Formatted label in the format "Alias (ID)" or just "ID" if no alias
+            str: The automation's alias if available, otherwise the ID
 
         Examples:
             label = builder.get_automation_label({"alias": "Turn on lights", "id": "123"})
-            # Returns: "Turn on lights (123)"
+            # Returns: "Turn on lights"
 
         """
-        return f"{automation.get('alias', automation.get('id', '?'))} ({automation.get('id', '?')})"
+        if automation:
+            return automation.get('alias', automation.get('id', '?'))
+        return '?'
 
     def get_script_label(self, script_id, script):
         """Generate a human-readable label for a script.
 
-        Creates a descriptive label combining the script's alias and ID for
-        display in the relationship tree. This helps users identify scripts
-        even when they have generic aliases.
+        Creates a descriptive label using the script's alias if available,
+        otherwise falls back to the script ID.
 
         Args:
             script_id (str): The script's unique identifier
             script (dict): Script configuration dictionary that may contain 'alias' key
 
         Returns:
-            str: Formatted label in the format "Alias (ID)" or just "ID" if no alias
+            str: The script's alias if available, otherwise the script ID
 
         Examples:
             label = builder.get_script_label("morning_routine", {"alias": "Morning Setup"})
-            # Returns: "Morning Setup (morning_routine)"
+            # Returns: "Morning Setup"
 
         """
-        return f"{script.get('alias', script_id)} ({script_id})"
+        if script:
+            return script.get('alias', script_id)
+        return script_id
 
     def extract_entities_from_value(self, value):
         """Recursively extract entity IDs from any YAML structure or template.
