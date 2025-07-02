@@ -4,15 +4,44 @@
     <meta charset="UTF-8">
     <title>Advanced Relations Visualization</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 2em; }
         h1 { color: #2196f3; }
         #visualization {
             border: 1px solid #ccc;
-            min-height: 400px;
             margin-top: 2em;
-            overflow: auto;
-            max-height: 80vh;
+            overflow: hidden;
+            position: relative;
+            height: calc(100vh - 500px);
+            min-height: 300px;
+        }
+        #network-container {
+            width: 100%;
+            height: 100%;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #controls button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 5px;
+        }
+        #controls button:hover {
+            background: #1976d2;
         }
         .section { margin-bottom: 2em; }
         .label { font-weight: bold; }
@@ -77,6 +106,63 @@
             color: #666;
             font-style: italic;
         }
+
+        /* Legend styles */
+        .legend {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 1em;
+            font-size: 12px;
+        }
+        .legend-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #333;
+        }
+        .legend-section {
+            margin-bottom: 10px;
+        }
+        .legend-section:last-child {
+            margin-bottom: 0;
+        }
+        .legend-section-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        .legend-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-shape {
+            width: 16px;
+            height: 16px;
+            border: 2px solid;
+            display: inline-block;
+            text-align: center;
+            line-height: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        .legend-shape.ellipse {
+            border-radius: 50%;
+        }
+        .legend-shape.box {
+            border-radius: 2px;
+        }
+        .legend-shape.diamond {
+            transform: rotate(45deg);
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -104,24 +190,67 @@
     </div>
     <div class="section">
         <span class="label">Recursion Depth:</span><br>
-        <input type="number" id="depth-input" value="3" min="0" step="1" style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; margin-top: 0.5em; width: 100px;">
-        <div style="font-size: 12px; color: #666; margin-top: 4px;">
-            Enter depth (0 = infinite, higher values show more indirect relationships but may take longer).
-        </div>
-        <div id="depth-warning" style="font-size: 12px; color: #ff9800; margin-top: 4px; display: none;">
-            Warning: High depth values may significantly slow down the analysis.
+        <div style="display: flex; gap: 2em; align-items: flex-start; margin-top: 0.5em;">
+            <div style="flex-shrink: 0;">
+                <input type="number" id="depth-input" value="3" min="0" step="1" style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 100px;">
+                <div style="font-size: 12px; color: #666; margin-top: 4px; width: 250px;">
+                    Enter depth (0 = infinite, higher values show more indirect relationships but may take longer).
+                </div>
+                <div id="depth-warning" style="font-size: 12px; color: #ff9800; margin-top: 4px; display: none; width: 250px;">
+                    Warning: High depth values may significantly slow down the analysis.
+                </div>
+            </div>
+            <div class="legend" style="flex: 1; margin-top: 0;">
+                <div class="legend-title">Legend</div>
+                <div class="legend-section">
+                    <div class="legend-section-title">Node Types & Shapes:</div>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <div class="legend-shape ellipse" style="background: #e3f2fd; border-color: #2196f3;"></div>
+                            <span>Entity (Circle)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-shape box" style="background: #e8f5e8; border-color: #4caf50;"></div>
+                            <span>Automation (Box)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-shape diamond" style="background: #fff3e0; border-color: #ff9800;"></div>
+                            <span>Script (Diamond)</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="legend-section">
+                    <div class="legend-section-title">Relationship Colors:</div>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <div class="legend-shape ellipse" style="background: #fff59d; border-color: #ffc107;"></div>
+                            <span>Selected Item</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-shape ellipse" style="background: #ffebee; border-color: #f44336;"></div>
+                            <span>Trigger</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-shape ellipse" style="background: #f3e5f5; border-color: #9c27b0;"></div>
+                            <span>Condition</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-shape ellipse" style="background: #e0f2f1; border-color: #009688;"></div>
+                            <span>Output</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     <div id="visualization">
-        <div id="json-container" style="display: none;">
-            <div style="margin-bottom: 10px;">
-                <button id="download-btn" style="background: #2196f3; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                    Download JSON
-                </button>
-            </div>
-            <pre id="json-output" style="background: #f5f5f5; padding: 20px; border-radius: 8px; overflow: auto; max-height: 600px; border: 1px solid #ddd; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4;"></pre>
+        <div id="controls">
+            <button id="download-btn">Download JSON</button>
+            <button id="fit-btn">Fit View</button>
+            <button id="reset-zoom-btn">Reset Zoom</button>
         </div>
-        <div id="no-selection-message" style="padding: 40px; text-align: center; color: #666; font-size: 16px;">
+        <div id="network-container"></div>
+        <div id="no-selection-message" style="padding: 40px; text-align: center; color: #666; font-size: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
             Select an entity, automation, or script above to view its relationships.
         </div>
     </div>
@@ -142,32 +271,327 @@
 
     // Store current JSON data for download
     var currentJsonData = null;
+    var network = null;
+    var networkData = null;
 
-    function renderJsonOutput(data) {
-        var jsonContainer = document.getElementById('json-container');
-        var jsonOutput = document.getElementById('json-output');
+    function createNetworkVisualization(data) {
+        var container = document.getElementById('network-container');
         var noSelectionMessage = document.getElementById('no-selection-message');
         var downloadBtn = document.getElementById('download-btn');
 
         if (!data || data.error) {
-            jsonOutput.textContent = data && data.error ? 'Error: ' + data.error : 'No related items found.';
-            jsonContainer.style.display = 'block';
-            noSelectionMessage.style.display = 'none';
+            noSelectionMessage.style.display = 'block';
+            if (network) {
+                network.destroy();
+                network = null;
+            }
             currentJsonData = null;
-            downloadBtn.disabled = true;
-            downloadBtn.style.opacity = '0.5';
             return;
         }
 
         // Store the data for download
         currentJsonData = data;
-
-        // Pretty print the JSON
-        jsonOutput.textContent = JSON.stringify(data, null, 2);
-        jsonContainer.style.display = 'block';
         noSelectionMessage.style.display = 'none';
-        downloadBtn.disabled = false;
-        downloadBtn.style.opacity = '1';
+
+        var nodes = new vis.DataSet();
+        var edges = new vis.DataSet();
+        var nodeIds = new Set();
+        var edgeId = 0;
+
+        // Color scheme for different types
+        var colors = {
+            entity: { background: '#e3f2fd', border: '#2196f3' },
+            automation: { background: '#e8f5e8', border: '#4caf50' },
+            script: { background: '#fff3e0', border: '#ff9800' },
+            trigger: { background: '#ffebee', border: '#f44336' },
+            condition: { background: '#f3e5f5', border: '#9c27b0' },
+            output: { background: '#e0f2f1', border: '#009688' },
+            selected: { background: '#fff59d', border: '#ffc107' }
+        };
+
+        function createNodeId(type, id, relationship) {
+            return `${type}_${id}_${relationship || 'main'}`;
+        }
+
+        function addNode(type, id, label, relationship, level, isMain = false) {
+            var nodeId = createNodeId(type, id, relationship);
+            if (nodeIds.has(nodeId)) return nodeId;
+
+            var color = isMain ? colors.selected : colors[relationship] || colors[type];
+            var shape = type === 'automation' ? 'box' : type === 'script' ? 'diamond' : 'ellipse';
+
+            // Add relationship prefix to non-main nodes
+            var displayLabel = isMain ? label : `[${relationship.toUpperCase()}] ${label}`;
+
+            nodes.add({
+                id: nodeId,
+                label: displayLabel,
+                color: color,
+                shape: shape,
+                font: { size: isMain ? 16 : 12, color: '#333' },
+                level: level,
+                type: type,
+                originalId: id,
+                relationship: relationship,
+                isMain: isMain
+            });
+
+            nodeIds.add(nodeId);
+            return nodeId;
+        }
+
+        function addEdge(fromId, toId, label, color = '#666') {
+            edges.add({
+                id: edgeId++,
+                from: fromId,
+                to: toId,
+                label: label,
+                color: { color: color },
+                arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+                font: { size: 10, color: '#666' }
+            });
+        }
+
+        // Add main node (selected item)
+        var relations = data.relations;
+        var mainNodeId = addNode(
+            relations.item_type,
+            relations.item_id,
+            relations.friendly_name,
+            'main',
+            0,
+            true
+        );
+
+        var currentLevel = 0;
+
+        // Process upstream relationships (what uses this item)
+        function processUpstream(upstream, parentNodeId, level) {
+            if (upstream.used_as_trigger_by) {
+                upstream.used_as_trigger_by.forEach(function(item) {
+                    var nodeId = addNode(item.type, item.id, item.name, 'trigger', level);
+                    addEdge(nodeId, parentNodeId, 'triggers', '#f44336');
+
+                    // Process triggers, conditions, outputs for this automation/script
+                    if (item.triggers) {
+                        item.triggers.forEach(function(trigger) {
+                            var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level + 1);
+                            addEdge(triggerNodeId, nodeId, 'triggers', '#f44336');
+                        });
+                    }
+                    if (item.conditions) {
+                        item.conditions.forEach(function(condition) {
+                            var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level + 1);
+                            addEdge(conditionNodeId, nodeId, 'conditions', '#9c27b0');
+                        });
+                    }
+                    if (item.outputs) {
+                        item.outputs.forEach(function(output) {
+                            var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level + 1);
+                            addEdge(nodeId, outputNodeId, 'outputs', '#009688');
+                        });
+                    }
+                });
+            }
+
+            if (upstream.used_as_condition_by) {
+                upstream.used_as_condition_by.forEach(function(item) {
+                    var nodeId = addNode(item.type, item.id, item.name, 'condition', level);
+                    addEdge(nodeId, parentNodeId, 'uses as condition', '#9c27b0');
+
+                    // Process triggers, conditions, outputs for this automation/script
+                    if (item.triggers) {
+                        item.triggers.forEach(function(trigger) {
+                            var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level + 1);
+                            addEdge(triggerNodeId, nodeId, 'triggers', '#f44336');
+                        });
+                    }
+                    if (item.conditions) {
+                        item.conditions.forEach(function(condition) {
+                            var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level + 1);
+                            addEdge(conditionNodeId, nodeId, 'conditions', '#9c27b0');
+                        });
+                    }
+                    if (item.outputs) {
+                        item.outputs.forEach(function(output) {
+                            var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level + 1);
+                            addEdge(nodeId, outputNodeId, 'outputs', '#009688');
+                        });
+                    }
+                });
+            }
+        }
+
+        // Process downstream relationships (what this item affects/depends on)
+        function processDownstream(downstream, parentNodeId, level) {
+            if (downstream.output_by) {
+                downstream.output_by.forEach(function(item) {
+                    var nodeId = addNode(item.type, item.entity_id || item.id, item.friendly_name || item.name, 'output', level);
+                    addEdge(parentNodeId, nodeId, 'depends on / outputs from', '#009688');
+
+                    // Process recursively for deeper relationships
+                    if (item.downstream) {
+                        processDownstream(item.downstream, nodeId, level + 1);
+                    }
+
+                    // Process triggers, conditions, outputs for automations/scripts
+                    if (item.triggers) {
+                        item.triggers.forEach(function(trigger) {
+                            var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level + 1);
+                            addEdge(triggerNodeId, nodeId, 'triggers', '#f44336');
+
+                            if (trigger.downstream) {
+                                processDownstream(trigger.downstream, triggerNodeId, level + 2);
+                            }
+                        });
+                    }
+                    if (item.conditions) {
+                        item.conditions.forEach(function(condition) {
+                            var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level + 1);
+                            addEdge(conditionNodeId, nodeId, 'conditions', '#9c27b0');
+
+                            if (condition.downstream) {
+                                processDownstream(condition.downstream, conditionNodeId, level + 2);
+                            }
+                        });
+                    }
+                    if (item.outputs) {
+                        item.outputs.forEach(function(output) {
+                            var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level + 1);
+                            addEdge(nodeId, outputNodeId, 'outputs', '#009688');
+                        });
+                    }
+                });
+            }
+
+            // Handle automation/script specific downstream
+            if (downstream.triggers) {
+                downstream.triggers.forEach(function(trigger) {
+                    var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level);
+                    addEdge(triggerNodeId, parentNodeId, 'triggers', '#f44336');
+                });
+            }
+            if (downstream.conditions) {
+                downstream.conditions.forEach(function(condition) {
+                    var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level);
+                    addEdge(conditionNodeId, parentNodeId, 'conditions', '#9c27b0');
+                });
+            }
+            if (downstream.outputs) {
+                downstream.outputs.forEach(function(output) {
+                    var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level);
+                    addEdge(parentNodeId, outputNodeId, 'outputs', '#009688');
+                });
+            }
+        }
+
+        // Process upstream (level -1, -2, etc.)
+        if (relations.upstream) {
+            processUpstream(relations.upstream, mainNodeId, -1);
+        }
+
+        // Process downstream (level 1, 2, etc.)
+        if (relations.downstream) {
+            processDownstream(relations.downstream, mainNodeId, 1);
+        }
+
+        // Create network
+        networkData = { nodes: nodes, edges: edges };
+
+        var options = {
+            layout: {
+                hierarchical: {
+                    enabled: true,
+                    direction: 'UD', // Up-Down
+                    sortMethod: 'directed',
+                    nodeSpacing: 200,
+                    levelSeparation: 150
+                }
+            },
+            physics: {
+                enabled: false
+            },
+            nodes: {
+                font: { size: 12 },
+                margin: 10,
+                widthConstraint: { maximum: 200 }
+            },
+            edges: {
+                smooth: {
+                    enabled: true,
+                    type: 'continuous'
+                }
+            },
+            interaction: {
+                dragNodes: true,
+                dragView: true,
+                zoomView: true
+            }
+        };
+
+        if (network) {
+            network.destroy();
+        }
+
+        network = new vis.Network(container, networkData, options);
+
+        // Add click handler for nodes
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                var node = nodes.get(nodeId);
+
+                // If it's not the main node and has the required properties, allow navigation
+                if (!node.isMain && node.originalId && node.type) {
+                    var apiType = node.type === 'entity' ? 'entity' : node.type;
+
+                    // Update the appropriate dropdown
+                    var dropdownType = apiType === 'entity' ? 'entities' : apiType + 's';
+                    var input = document.querySelector('#' + dropdownType + '-dropdown .search-input');
+                    if (input) {
+                        // Find the item in allData to get the display text
+                        var item = allData[dropdownType].find(function(item) {
+                            return (apiType === 'entity' ? item.entity_id : item.id) === node.originalId;
+                        });
+
+                        if (item) {
+                            var displayText;
+                            if (apiType === 'entity') {
+                                displayText = item.friendly_name && item.friendly_name !== item.entity_id
+                                    ? item.friendly_name + ' (' + item.entity_id + ')'
+                                    : item.entity_id;
+                            } else {
+                                displayText = item.alias + ' (' + item.id + ')';
+                            }
+
+                            input.value = displayText;
+                            selectedValues[dropdownType] = node.originalId;
+
+                            // Clear other selections
+                            Object.keys(selectedValues).forEach(function(key) {
+                                if (key !== dropdownType) {
+                                    selectedValues[key] = null;
+                                    var otherInput = document.querySelector('#' + key + '-dropdown .search-input');
+                                    if (otherInput) otherInput.value = '';
+                                }
+                            });
+
+                            // Fetch new data
+                            fetchAndShowFlow(apiType, node.originalId);
+                        }
+                    }
+                }
+            }
+        });
+
+        // Fit the network to show all nodes
+        setTimeout(function() {
+            network.fit();
+        }, 100);
+    }
+
+    function renderJsonOutput(data) {
+        createNetworkVisualization(data);
     }
 
     function downloadJson() {
@@ -344,7 +768,20 @@
 
     document.addEventListener('DOMContentLoaded', function() {
       // Add download button event listener
-      document.getElementById('download-btn').addEventListener('click', downloadJson);      // Add depth change event listener
+      document.getElementById('download-btn').addEventListener('click', downloadJson);
+
+      // Add network control event listeners
+      document.getElementById('fit-btn').addEventListener('click', function() {
+        if (network) {
+          network.fit();
+        }
+      });
+
+      document.getElementById('reset-zoom-btn').addEventListener('click', function() {
+        if (network) {
+          network.moveTo({scale: 1.0});
+        }
+      });      // Add depth change event listener
       document.getElementById('depth-input').addEventListener('input', function() {
         var depthValue = parseInt(this.value);
         var warningDiv = document.getElementById('depth-warning');
