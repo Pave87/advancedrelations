@@ -6,6 +6,7 @@ Home Assistant components (entities, automations, scripts) relate to each other.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -370,6 +371,132 @@ def preprocess_scripts(hass: HomeAssistant) -> dict[str, Any]:
     return {"scripts": scripts_data}
 
 
+def _read_storage_file(storage_dir: Path, filename: str) -> dict[str, Any]:
+    """Read a storage file and return its data."""
+    storage_file = storage_dir / filename
+    if storage_file.exists():
+        try:
+            with storage_file.open(encoding="utf-8") as file:
+                return json.load(file) or {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
+            _LOGGER.debug("Error reading %s storage: %s", filename, e)
+    return {}
+
+
+def _process_template_entity(storage_dir: Path, unique_id: str) -> list[str]:
+    """Process template entity and return conditions."""
+    conditions = []
+
+    # Template entities are stored in config entries, not separate storage files
+    config_entries_data = _read_storage_file(storage_dir, "core.config_entries")
+
+    for entry in config_entries_data.get("data", {}).get("entries", []):
+        if entry.get("domain") == "template":
+            # Check if this config entry corresponds to our entity
+            # Template entities use entry_id as unique_id in entity registry
+            entry_id = entry.get("entry_id", "")
+            if entry_id == unique_id:
+                options = entry.get("options", {})
+                template_str = options.get("state", "")
+                if template_str:
+                    import re
+
+                    # Extract entity references from template
+                    entity_refs = re.findall(
+                        r'states\([\'"]([^\'\"]+)[\'\"]\)', template_str
+                    )
+                    entity_refs.extend(
+                        re.findall(
+                            r"states\.([a-zA-Z0-9_]+\.[a-zA-Z0-9_]+)", template_str
+                        )
+                    )
+                    conditions.extend(entity_refs)
+                break
+    return conditions
+
+
+def _process_utility_meter_entity(storage_dir: Path, unique_id: str) -> list[str]:
+    """Process utility meter entity and return triggers."""
+    triggers = []
+
+    # Check if utility meter is stored in config entries
+    config_entries_data = _read_storage_file(storage_dir, "core.config_entries")
+
+    for entry in config_entries_data.get("data", {}).get("entries", []):
+        if entry.get("domain") == "utility_meter":
+            entry_id = entry.get("entry_id", "")
+            if entry_id == unique_id:
+                options = entry.get("options", {})
+                source_entity = options.get("source_entity", "")
+                if source_entity:
+                    triggers.append(source_entity)
+                break
+
+    return triggers
+
+
+def _process_statistics_entity(storage_dir: Path, unique_id: str) -> list[str]:
+    """Process statistics entity and return triggers."""
+    triggers = []
+
+    # Check if statistics is stored in config entries
+    config_entries_data = _read_storage_file(storage_dir, "core.config_entries")
+
+    for entry in config_entries_data.get("data", {}).get("entries", []):
+        if entry.get("domain") == "statistics":
+            entry_id = entry.get("entry_id", "")
+            if entry_id == unique_id:
+                options = entry.get("options", {})
+                source_entity = options.get("source_entity", "")
+                if source_entity:
+                    triggers.append(source_entity)
+                break
+
+    return triggers
+
+
+def _process_min_max_entity(storage_dir: Path, unique_id: str) -> list[str]:
+    """Process min/max entity and return triggers."""
+    triggers = []
+
+    # Check if min_max is stored in config entries
+    config_entries_data = _read_storage_file(storage_dir, "core.config_entries")
+
+    for entry in config_entries_data.get("data", {}).get("entries", []):
+        if entry.get("domain") == "min_max":
+            entry_id = entry.get("entry_id", "")
+            if entry_id == unique_id:
+                options = entry.get("options", {})
+                entity_ids = options.get("entity_ids", [])
+                if isinstance(entity_ids, str):
+                    entity_ids = [entity_ids]
+                triggers.extend(entity_ids)
+                break
+
+    return triggers
+
+
+def _process_group_entity(storage_dir: Path, unique_id: str) -> list[str]:
+    """Process group entity and return triggers."""
+    triggers = []
+
+    # Check if group is stored in config entries
+    config_entries_data = _read_storage_file(storage_dir, "core.config_entries")
+
+    for entry in config_entries_data.get("data", {}).get("entries", []):
+        if entry.get("domain") == "group":
+            entry_id = entry.get("entry_id", "")
+            if entry_id == unique_id:
+                options = entry.get("options", {})
+                entity_ids = options.get("entities", [])
+                if isinstance(entity_ids, str):
+                    entity_ids = [entity_ids]
+                triggers.extend(entity_ids)
+                break
+
+    return triggers
+
+
 def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
     """Preprocess entities to extract relevant information for relationship analysis.
 
@@ -381,8 +508,71 @@ def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
 
     """
     _LOGGER.debug("Preprocessing entities")
-    # TODO: Implement entity preprocessing logic
-    return {}
+
+    entities_data = []
+
+    # Get the config directory path
+    config_dir = Path(hass.config.config_dir)
+    storage_dir = config_dir / ".storage"
+
+    try:
+        # Read entity registry to get UI-created entities
+        entity_registry_data = _read_storage_file(storage_dir, "core.entity_registry")
+        entities = entity_registry_data.get("data", {}).get("entities", [])
+
+        for entity_entry in entities:
+            if not isinstance(entity_entry, dict):
+                continue
+
+            entity_id = entity_entry.get("entity_id", "")
+            platform = entity_entry.get("platform", "")
+            unique_id = entity_entry.get("unique_id", "")
+
+            entity_type = None
+            triggers = []
+            conditions = []
+
+            # Process different entity types
+            if platform == "template":
+                entity_type = "template"
+                template_conditions = _process_template_entity(storage_dir, unique_id)
+                conditions.extend(template_conditions)
+                _LOGGER.debug(
+                    "Template entity %s has conditions: %s",
+                    entity_id,
+                    template_conditions,
+                )
+            elif platform == "utility_meter":
+                entity_type = "utility_meter"
+                triggers.extend(_process_utility_meter_entity(storage_dir, unique_id))
+            elif platform == "statistics":
+                entity_type = "statistics"
+                triggers.extend(_process_statistics_entity(storage_dir, unique_id))
+            elif platform == "min_max":
+                entity_type = "min_max"
+                triggers.extend(_process_min_max_entity(storage_dir, unique_id))
+            elif platform == "group":
+                entity_type = "group"
+                triggers.extend(_process_group_entity(storage_dir, unique_id))
+
+            # Only include entities that have dependencies
+            if triggers or conditions:
+                friendly_name = entity_entry.get("name") or entity_id
+
+                entity_data = {
+                    "id": entity_id,
+                    "friendly_name": friendly_name,
+                    "entity_type": entity_type or platform,
+                    "triggers": triggers,
+                    "conditions": conditions,
+                    "outputs": [],  # Entities don't have outputs
+                }
+                entities_data.append(entity_data)
+
+    except (FileNotFoundError, yaml.YAMLError, OSError) as e:
+        _LOGGER.error("Error reading entity storage files: %s", e)
+
+    return {"entities": entities_data}
 
 
 def find_comprehensive_relations(
