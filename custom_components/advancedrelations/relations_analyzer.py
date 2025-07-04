@@ -322,8 +322,52 @@ def preprocess_scripts(hass: HomeAssistant) -> dict[str, Any]:
 
     """
     _LOGGER.debug("Preprocessing scripts")
-    # TODO: Implement script preprocessing logic
-    return {}
+
+    # Get the config directory path
+    config_dir = Path(hass.config.config_dir)
+    scripts_file = config_dir / "scripts.yaml"
+
+    scripts_data = []
+
+    try:
+        if scripts_file.exists():
+            with scripts_file.open(encoding="utf-8") as file:
+                scripts = yaml.safe_load(file) or {}
+
+            for script_key, script_config in scripts.items():
+                if not isinstance(script_config, dict):
+                    continue
+
+                script_id = f"script.{script_key}"
+                friendly_name = script_config.get("alias", script_id)
+
+                # Scripts don't have triggers, only conditions and outputs
+                # Extract conditions from the script sequence
+                conditions = []
+                sequence = script_config.get("sequence", [])
+                if not isinstance(sequence, list):
+                    sequence = [sequence]
+
+                conditions.extend(_extract_conditions_from_actions(sequence))
+
+                # Extract outputs from the script sequence
+                outputs = []
+                outputs.extend(_extract_outputs_from_actions(sequence))
+
+                script_data = {
+                    "id": script_id,
+                    "friendly_name": friendly_name,
+                    "triggers": [],  # Scripts don't have triggers
+                    "conditions": conditions,
+                    "outputs": outputs,
+                }
+
+                scripts_data.append(script_data)
+
+    except (FileNotFoundError, yaml.YAMLError, OSError) as e:
+        _LOGGER.error("Error reading scripts.yaml: %s", e)
+
+    return {"scripts": scripts_data}
 
 
 def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
