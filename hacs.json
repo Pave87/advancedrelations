@@ -1,6 +1,6 @@
 {
   "name": "Advanced Relations",
-  "hacs": "0.0.1",
+  "hacs": "0.1.0",
   "domains": ["advancedrelations"],
   "iot_class": "Calculated",
   "homeassistant": "2025.1.0"
