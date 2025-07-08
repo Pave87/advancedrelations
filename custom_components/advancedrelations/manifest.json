@@ -4,7 +4,7 @@
   "config_flow": true,
   "documentation": "hhttps://github.com/Pave87/advancedrelations",
   "issue_tracker": "https://github.com/Pave87/advancedrelations/issues",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "codeowners": ["@Pave87"],
   "dependencies": [],
   "requirements": [],
