@@ -6,15 +6,60 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 2em; }
-        h1 { color: #2196f3; }
+        /* Theme variables */
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #333333;
+            --primary-color: #2196f3;
+            --primary-hover: #1976d2;
+            --border-color: #cccccc;
+            --section-bg: #f9f9f9;
+            --section-border: #dddddd;
+            --input-bg: #ffffff;
+            --dropdown-bg: #ffffff;
+            --dropdown-hover: #f5f5f5;
+            --dropdown-selected: #e3f2fd;
+            --controls-bg: rgba(255, 255, 255, 0.9);
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --warning-color: #ff9800;
+            --muted-color: #666666;
+        }
+
+        /* Dark theme */
+        [data-theme="dark"] {
+            --bg-color: #1e1e1e;
+            --text-color: #e0e0e0;
+            --primary-color: #64b5f6;
+            --primary-hover: #42a5f5;
+            --border-color: #404040;
+            --section-bg: #2d2d2d;
+            --section-border: #404040;
+            --input-bg: #2d2d2d;
+            --dropdown-bg: #2d2d2d;
+            --dropdown-hover: #404040;
+            --dropdown-selected: #1565c0;
+            --controls-bg: rgba(45, 45, 45, 0.9);
+            --shadow-color: rgba(0, 0, 0, 0.3);
+            --warning-color: #ffb74d;
+            --muted-color: #a0a0a0;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 2em;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        h1 { color: var(--primary-color); }
         #visualization {
-            border: 1px solid #ccc;
+            border: 1px solid var(--border-color);
             margin-top: 2em;
             overflow: hidden;
             position: relative;
             height: calc(100vh - 500px);
             min-height: 300px;
+            background-color: var(--bg-color);
         }
         #network-container {
             width: 100%;
@@ -25,13 +70,14 @@
             top: 10px;
             right: 10px;
             z-index: 1000;
-            background: rgba(255, 255, 255, 0.9);
+            background: var(--controls-bg);
             padding: 10px;
             border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px var(--shadow-color);
+            backdrop-filter: blur(10px);
         }
         #controls button {
-            background: #2196f3;
+            background: var(--primary-color);
             color: white;
             border: none;
             padding: 8px 16px;
@@ -39,12 +85,18 @@
             cursor: pointer;
             font-size: 12px;
             margin-left: 5px;
+            transition: background-color 0.2s ease;
         }
         #controls button:hover {
-            background: #1976d2;
+            background: var(--primary-hover);
         }
-        .section { margin-bottom: 2em; }
-        .label { font-weight: bold; }
+        .section {
+            margin-bottom: 2em;
+        }
+        .label {
+            font-weight: bold;
+            color: var(--text-color);
+        }
 
         /* Searchable dropdown styles */
         .searchable-dropdown {
@@ -56,14 +108,17 @@
         .search-input {
             width: 100%;
             padding: 8px 12px;
-            border: 1px solid #ccc;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             font-size: 14px;
             box-sizing: border-box;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            transition: border-color 0.2s ease, background-color 0.3s ease;
         }
 
         .search-input:focus {
-            border-color: #2196f3;
+            border-color: var(--primary-color);
             outline: none;
             box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
         }
@@ -73,24 +128,27 @@
             top: 100%;
             left: 0;
             right: 0;
-            background: white;
-            border: 1px solid #ccc;
+            background: var(--dropdown-bg);
+            border: 1px solid var(--border-color);
             border-top: none;
             border-radius: 0 0 4px 4px;
             max-height: 200px;
             overflow-y: auto;
             z-index: 1000;
             display: none;
+            box-shadow: 0 2px 4px var(--shadow-color);
         }
 
         .dropdown-item {
             padding: 8px 12px;
             cursor: pointer;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-color);
+            transition: background-color 0.2s ease;
         }
 
         .dropdown-item:hover {
-            background-color: #f5f5f5;
+            background-color: var(--dropdown-hover);
         }
 
         .dropdown-item:last-child {
@@ -98,29 +156,31 @@
         }
 
         .dropdown-item.selected {
-            background-color: #e3f2fd;
+            background-color: var(--dropdown-selected);
+            color: white;
         }
 
         .no-results {
             padding: 8px 12px;
-            color: #666;
+            color: var(--muted-color);
             font-style: italic;
         }
 
         /* Legend styles */
         .legend {
-            background: #f9f9f9;
-            border: 1px solid #ddd;
+            background: var(--section-bg);
+            border: 1px solid var(--section-border);
             border-radius: 4px;
             padding: 15px;
             margin-top: 1em;
             font-size: 12px;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
         .legend-title {
             font-weight: bold;
             margin-bottom: 10px;
             font-size: 14px;
-            color: #333;
+            color: var(--text-color);
         }
         .legend-section {
             margin-bottom: 10px;
@@ -131,7 +191,7 @@
         .legend-section-title {
             font-weight: bold;
             margin-bottom: 5px;
-            color: #555;
+            color: var(--text-color);
         }
         .legend-items {
             display: flex;
@@ -142,6 +202,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
+            color: var(--text-color);
         }
         .legend-shape {
             width: 16px;
@@ -162,6 +223,34 @@
         .legend-shape.diamond {
             transform: rotate(45deg);
             border-radius: 2px;
+        }
+
+        /* Input styles */
+        input[type="number"] {
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            transition: background-color 0.3s ease, border-color 0.2s ease;
+        }
+
+        input[type="number"]:focus {
+            border-color: var(--primary-color);
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+        }
+
+        /* Warning and info text */
+        #depth-warning {
+            color: var(--warning-color) !important;
+        }
+
+        .section div {
+            color: var(--muted-color);
+        }
+
+        /* No selection message */
+        #no-selection-message {
+            color: var(--muted-color);
         }
     </style>
 </head>
@@ -192,11 +281,11 @@
         <span class="label">Recursion Depth:</span><br>
         <div style="display: flex; gap: 2em; align-items: flex-start; margin-top: 0.5em;">
             <div style="flex-shrink: 0;">
-                <input type="number" id="depth-input" value="3" min="0" step="1" style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 100px;">
-                <div style="font-size: 12px; color: #666; margin-top: 4px; width: 250px;">
+                <input type="number" id="depth-input" value="3" min="0" step="1" style="padding: 8px 12px; border-radius: 4px; font-size: 14px; width: 100px;">
+                <div style="font-size: 12px; margin-top: 4px; width: 250px; color: var(--muted-color);">
                     Enter depth (0 = infinite, higher values show more indirect relationships but may take longer).
                 </div>
-                <div id="depth-warning" style="font-size: 12px; color: #ff9800; margin-top: 4px; display: none; width: 250px;">
+                <div id="depth-warning" style="font-size: 12px; margin-top: 4px; display: none; width: 250px;">
                     Warning: High depth values may significantly slow down the analysis.
                 </div>
             </div>
@@ -237,17 +326,207 @@
     </div>
     <div id="visualization">
         <div id="controls">
+            <button id="theme-toggle-btn">🌙 Dark</button>
             <button id="download-btn">Download JSON</button>
             <button id="fit-btn">Fit View</button>
             <button id="reset-zoom-btn">Reset Zoom</button>
             <button id="layout-toggle-btn">Hierarchical Layout</button>
         </div>
         <div id="network-container"></div>
-        <div id="no-selection-message" style="padding: 40px; text-align: center; color: #666; font-size: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+        <div id="no-selection-message" style="padding: 40px; text-align: center; font-size: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--muted-color);">
             Select an entity, automation, or script above to view its relationships.
         </div>
     </div>
     <script>
+    // Theme detection and management
+    function detectAndApplyTheme() {
+        // First, try to detect Home Assistant theme from parent window
+        let theme = 'light'; // default
+
+        try {
+            // Check if we're in an iframe and can access parent
+            if (window.parent && window.parent !== window) {
+                // Try to get theme from Home Assistant's document
+                const parentDoc = window.parent.document;
+                const haElement = parentDoc.querySelector('home-assistant');
+
+                if (haElement) {
+                    // Check for hass object theme
+                    if (window.parent.hass && window.parent.hass.themes) {
+                        const selectedTheme = window.parent.hass.selectedTheme;
+                        const themes = window.parent.hass.themes.themes;
+
+                        if (selectedTheme && themes[selectedTheme]) {
+                            // Check if it's a dark theme based on common indicators
+                            const themeData = themes[selectedTheme];
+                            if (themeData['primary-background-color']) {
+                                const bgColor = themeData['primary-background-color'];
+                                // Parse color to determine if it's dark
+                                const isDark = isColorDark(bgColor);
+                                theme = isDark ? 'dark' : 'light';
+                            }
+                        }
+                    }
+
+                    // Fallback: check for dark theme class on body or html
+                    if (theme === 'light') {
+                        const body = parentDoc.body;
+                        const html = parentDoc.documentElement;
+                        if (body.classList.contains('dark-theme') ||
+                            html.classList.contains('dark-theme') ||
+                            body.getAttribute('data-theme') === 'dark' ||
+                            html.getAttribute('data-theme') === 'dark') {
+                            theme = 'dark';
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // If we can't access parent (CORS, etc.), fall back to system preference
+            console.log('Cannot access parent window, using system preference');
+        }
+
+        // Fallback to system preference if we couldn't detect from HA
+        if (theme === 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            theme = 'dark';
+        }
+
+        // Apply theme
+        applyTheme(theme);
+
+        return theme;
+    }
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+
+        // Update theme toggle button
+        const themeBtn = document.getElementById('theme-toggle-btn');
+        if (themeBtn) {
+            themeBtn.textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+        }
+
+        // Update network colors if network exists
+        if (network && networkData) {
+            updateNetworkTheme(theme);
+        }
+    }
+
+    function toggleTheme() {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        applyTheme(newTheme);
+    }
+
+    function isColorDark(color) {
+        // Convert color to RGB and calculate luminance
+        let r, g, b;
+
+        if (color.startsWith('#')) {
+            // Hex color
+            const hex = color.slice(1);
+            r = parseInt(hex.substr(0, 2), 16);
+            g = parseInt(hex.substr(2, 2), 16);
+            b = parseInt(hex.substr(4, 2), 16);
+        } else if (color.startsWith('rgb')) {
+            // RGB color
+            const matches = color.match(/\d+/g);
+            if (matches && matches.length >= 3) {
+                r = parseInt(matches[0]);
+                g = parseInt(matches[1]);
+                b = parseInt(matches[2]);
+            } else {
+                return false; // Default to light if can't parse
+            }
+        } else {
+            return false; // Default to light for unknown formats
+        }
+
+        // Calculate relative luminance
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return luminance < 0.5; // Dark if luminance is less than 50%
+    }
+
+    function updateNetworkTheme(theme) {
+        if (!network || !networkData) return;
+
+        // Update colors based on new theme
+        colors = getColors();
+
+        // Update network background based on theme
+        const backgroundColor = theme === 'dark' ? '#1e1e1e' : '#ffffff';
+        const fontColor = theme === 'dark' ? '#e0e0e0' : '#333333';
+
+        // Update network container background
+        const container = document.getElementById('network-container');
+        if (container) {
+            container.style.backgroundColor = backgroundColor;
+        }
+
+        // Update all nodes with new colors
+        const nodes = networkData.nodes;
+        const nodeUpdates = [];
+
+        nodes.forEach(function(node) {
+            const newColor = node.isMain ? colors.selected : colors[node.type] || colors.entity;
+            nodeUpdates.push({
+                id: node.id,
+                color: newColor,
+                font: {
+                    size: node.isMain ? 16 : 12,
+                    color: fontColor,
+                    bold: node.isMain
+                }
+            });
+        });
+
+        // Apply node updates
+        nodes.update(nodeUpdates);
+
+        // Update edge colors
+        const edges = networkData.edges;
+        const edgeUpdates = [];
+
+        edges.forEach(function(edge) {
+            edgeUpdates.push({
+                id: edge.id,
+                font: { color: fontColor }
+            });
+        });
+
+        // Apply edge updates
+        edges.update(edgeUpdates);
+
+        // Update network options
+        network.setOptions({
+            nodes: {
+                font: { color: fontColor }
+            },
+            edges: {
+                font: { color: fontColor }
+            }
+        });
+    }
+
+    // Listen for system theme changes
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+            // Re-detect theme when system preference changes
+            setTimeout(detectAndApplyTheme, 100);
+        });
+    }
+
+    // Listen for Home Assistant theme changes (if accessible)
+    try {
+        if (window.parent && window.parent !== window && window.parent.addEventListener) {
+            window.parent.addEventListener('hass-theme-changed', function() {
+                setTimeout(detectAndApplyTheme, 100);
+            });
+        }
+    } catch (e) {
+        // Ignore if we can't access parent
+    }
+
     // Store all data for filtering
     var allData = {
         entities: [],
@@ -294,16 +573,35 @@
         // Track edges to prevent duplicates
         var edgeMap = new Map();
 
-        // Color scheme for different types
-        var colors = {
-            entity: { background: '#e3f2fd', border: '#2196f3' },
-            automation: { background: '#e8f5e8', border: '#4caf50' },
-            script: { background: '#fff3e0', border: '#ff9800' },
-            trigger: { background: '#ffebee', border: '#f44336' },
-            condition: { background: '#f3e5f5', border: '#9c27b0' },
-            output: { background: '#e0f2f1', border: '#009688' },
-            selected: { background: '#fff59d', border: '#ffc107' }
-        };
+        // Color scheme for different types (theme-aware)
+        function getColors() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+            if (isDark) {
+                return {
+                    entity: { background: '#1565c0', border: '#64b5f6' },
+                    automation: { background: '#2e7d32', border: '#81c784' },
+                    script: { background: '#ef6c00', border: '#ffb74d' },
+                    trigger: { background: '#c62828', border: '#f48fb1' },
+                    condition: { background: '#6a1b9a', border: '#ce93d8' },
+                    output: { background: '#00695c', border: '#80cbc4' },
+                    selected: { background: '#f57f17', border: '#fff176' }
+                };
+            } else {
+                return {
+                    entity: { background: '#e3f2fd', border: '#2196f3' },
+                    automation: { background: '#e8f5e8', border: '#4caf50' },
+                    script: { background: '#fff3e0', border: '#ff9800' },
+                    trigger: { background: '#ffebee', border: '#f44336' },
+                    condition: { background: '#f3e5f5', border: '#9c27b0' },
+                    output: { background: '#e0f2f1', border: '#009688' },
+                    selected: { background: '#fff59d', border: '#ffc107' }
+                };
+            }
+        }
+
+        // Refresh colors for current theme
+        var colors = getColors();
 
         function createNodeId(type, id, relationship, level) {
             // Use only type and id to ensure each item appears only once
@@ -468,8 +766,12 @@
             processRelationships(relations.downstream, mainNodeId, 0, false);
         }
 
-        // Create network
+        // Create network with theme-aware options
         networkData = { nodes: nodes, edges: edges };
+
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const backgroundColor = isDark ? '#1e1e1e' : '#ffffff';
+        const fontColor = isDark ? '#e0e0e0' : '#333333';
 
         var options = {
             layout: {
@@ -488,7 +790,7 @@
                 }
             },
             nodes: {
-                font: { size: 12 },
+                font: { size: 12, color: fontColor },
                 margin: 10,
                 widthConstraint: { maximum: 200 }
             },
@@ -500,12 +802,16 @@
                 },
                 arrows: {
                     to: { enabled: true, scaleFactor: 0.8 }
-                }
+                },
+                font: { color: fontColor }
             },
             interaction: {
                 dragNodes: true,
                 dragView: true,
                 zoomView: true
+            },
+            configure: {
+                enabled: false
             }
         };
 
@@ -514,6 +820,9 @@
         }
 
         network = new vis.Network(container, networkData, options);
+
+        // Set container background based on theme
+        container.style.backgroundColor = backgroundColor;
 
         // Add click handler for nodes
         network.on('click', function(params) {
@@ -746,6 +1055,12 @@
     }
 
     document.addEventListener('DOMContentLoaded', function() {
+      // Detect and apply initial theme
+      detectAndApplyTheme();
+
+      // Add theme toggle button event listener
+      document.getElementById('theme-toggle-btn').addEventListener('click', toggleTheme);
+
       // Add download button event listener
       document.getElementById('download-btn').addEventListener('click', downloadJson);
 
