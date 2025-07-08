@@ -668,13 +668,513 @@ def find_comprehensive_relations(
     scripts = preprocess_scripts(hass)
     entities = preprocess_entities(hass)
 
+    upstream = process_upstream(
+        max_depth, automations, scripts, entities, item_type, item_id
+    )
+    downstream = process_downstream(
+        max_depth, automations, scripts, entities, item_type, item_id
+    )
+
+    # Get friendly name for the main item
+    friendly_name = _get_friendly_name(item_id, automations, scripts, entities)
+
     # Placeholder implementation - returns empty structure matching the documented format
     return {
         "relations": {
             "item_type": item_type,
             "item_id": item_id,
-            "friendly_name": item_id,  # TODO: Get actual friendly name from data_loader
-            "upstream": [],
-            "downstream": [],
+            "friendly_name": friendly_name,
+            "upstream": upstream,
+            "downstream": downstream,
         }
     }
+
+
+def process_upstream(
+    max_depth: int,
+    automations: dict[str, Any],
+    scripts: dict[str, Any],
+    entities: dict[str, Any],
+    item_type: str,
+    item_id: str,
+    current_depth: int = 0,
+    visited: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Process upstream relations for a given item recursively.
+
+    Args:
+        max_depth: Maximum depth for relationship traversal
+        automations: Preprocessed automations data
+        scripts: Preprocessed scripts data
+        entities: Preprocessed entities data
+        item_type: Type of item to analyze ('entity', 'automation', or 'script')
+        item_id: Unique identifier of the item to analyze
+        current_depth: Current depth in the recursion
+        visited: Set of visited items to prevent circular references
+
+    Returns:
+        List of upstream relations
+
+    """
+    if visited is None:
+        visited = set()
+
+    # Create unique identifier for this item
+    unique_key = f"{item_type}:{item_id}"
+
+    # Check for circular reference
+    if unique_key in visited:
+        return []
+
+    # Add to visited set
+    visited = visited.copy()  # Create new copy to avoid modifying parent's set
+    visited.add(unique_key)
+
+    upstream = []
+
+    # Stop recursion if we've reached max depth
+    if max_depth > 0 and current_depth >= max_depth:
+        return upstream
+
+    # Find upstream relations for any item type
+    if item_type in ("entity", "automation", "script"):
+        upstream.extend(
+            _find_upstream_for_item(
+                item_id,
+                item_type,
+                automations,
+                scripts,
+                entities,
+                max_depth,
+                current_depth,
+                visited,
+            )
+        )
+
+    return upstream
+
+
+def _find_upstream_for_item(
+    item_id: str,
+    item_type: str,
+    automations: dict[str, Any],
+    scripts: dict[str, Any],
+    entities: dict[str, Any],
+    max_depth: int,
+    current_depth: int,
+    visited: set[str],
+) -> list[dict[str, Any]]:
+    """Find upstream relations for any item type."""
+    upstream = []
+
+    # Get the data collection based on item type
+    if item_type == "entity":
+        data_collection = entities.get("entities", [])
+    elif item_type == "automation":
+        data_collection = automations.get("automations", [])
+    elif item_type == "script":
+        data_collection = scripts.get("scripts", [])
+    else:
+        return upstream
+
+    # Find the specific item
+    for item_data in data_collection:
+        if item_data["id"] == item_id:
+            # Add triggers as upstream (entities and automations have triggers, scripts don't)
+            if item_type in ("entity", "automation"):
+                for trigger_entity in item_data.get("triggers", []):
+                    # Skip time-based and device triggers for automations
+                    if item_type == "automation" and trigger_entity.startswith(
+                        ("trigger:", "device:")
+                    ):
+                        continue
+
+                    friendly_name = _get_friendly_name(
+                        trigger_entity, automations, scripts, entities
+                    )
+                    upstream_item = {
+                        "item_type": "entity",
+                        "item_id": trigger_entity,
+                        "friendly_name": friendly_name,
+                        "relation_type": "trigger",
+                        "upstream": [],
+                        "downstream": [],
+                    }
+
+                    # Recursively process upstream for this trigger entity
+                    if max_depth == 0 or current_depth < max_depth - 1:
+                        upstream_item["upstream"] = process_upstream(
+                            max_depth,
+                            automations,
+                            scripts,
+                            entities,
+                            "entity",
+                            trigger_entity,
+                            current_depth + 1,
+                            visited,
+                        )
+
+                    upstream.append(upstream_item)
+
+            # Add conditions as upstream (all item types can have conditions)
+            for condition_entity in item_data.get("conditions", []):
+                # Skip device conditions
+                if condition_entity.startswith("device:"):
+                    continue
+
+                friendly_name = _get_friendly_name(
+                    condition_entity, automations, scripts, entities
+                )
+                upstream_item = {
+                    "item_type": "entity",
+                    "item_id": condition_entity,
+                    "friendly_name": friendly_name,
+                    "relation_type": "condition",
+                    "upstream": [],
+                    "downstream": [],
+                }
+
+                # Recursively process upstream for this condition entity
+                if max_depth == 0 or current_depth < max_depth - 1:
+                    upstream_item["upstream"] = process_upstream(
+                        max_depth,
+                        automations,
+                        scripts,
+                        entities,
+                        "entity",
+                        condition_entity,
+                        current_depth + 1,
+                        visited,
+                    )
+
+                upstream.append(upstream_item)
+            break
+
+    # For entities, check what controls/creates this entity (upstream)
+    if item_type == "entity":
+        # Check automations that OUTPUT TO this entity (controls it)
+        for automation_data in automations.get("automations", []):
+            if item_id in automation_data.get("outputs", []):
+                friendly_name = automation_data.get(
+                    "friendly_name", automation_data["id"]
+                )
+                upstream_item = {
+                    "item_type": "automation",
+                    "item_id": automation_data["id"],
+                    "friendly_name": friendly_name,
+                    "relation_type": "output",  # This automation outputs to this entity
+                    "upstream": [],
+                    "downstream": [],
+                }
+
+                # Recursively process upstream for this automation
+                if max_depth == 0 or current_depth < max_depth - 1:
+                    upstream_item["upstream"] = process_upstream(
+                        max_depth,
+                        automations,
+                        scripts,
+                        entities,
+                        "automation",
+                        automation_data["id"],
+                        current_depth + 1,
+                        visited,
+                    )
+
+                upstream.append(upstream_item)
+
+        # Check scripts that OUTPUT TO this entity (controls it)
+        for script_data in scripts.get("scripts", []):
+            if item_id in script_data.get("outputs", []):
+                friendly_name = script_data.get("friendly_name", script_data["id"])
+                upstream_item = {
+                    "item_type": "script",
+                    "item_id": script_data["id"],
+                    "friendly_name": friendly_name,
+                    "relation_type": "output",  # This script outputs to this entity
+                    "upstream": [],
+                    "downstream": [],
+                }
+
+                # Recursively process upstream for this script
+                if max_depth == 0 or current_depth < max_depth - 1:
+                    upstream_item["upstream"] = process_upstream(
+                        max_depth,
+                        automations,
+                        scripts,
+                        entities,
+                        "script",
+                        script_data["id"],
+                        current_depth + 1,
+                        visited,
+                    )
+
+                upstream.append(upstream_item)
+
+    return upstream
+
+
+def process_downstream(
+    max_depth: int,
+    automations: dict[str, Any],
+    scripts: dict[str, Any],
+    entities: dict[str, Any],
+    item_type: str,
+    item_id: str,
+    current_depth: int = 0,
+    visited: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Process downstream relations for a given item recursively.
+
+    Args:
+        max_depth: Maximum depth for relationship traversal
+        automations: Preprocessed automations data
+        scripts: Preprocessed scripts data
+        entities: Preprocessed entities data
+        item_type: Type of item to analyze ('entity', 'automation', or 'script')
+        item_id: Unique identifier of the item to analyze
+        current_depth: Current depth in the recursion
+        visited: Set of visited items to prevent circular references
+
+    Returns:
+        List of downstream relations
+
+    """
+    if visited is None:
+        visited = set()
+
+    # Create unique identifier for this item
+    unique_key = f"{item_type}:{item_id}"
+
+    # Check for circular reference
+    if unique_key in visited:
+        return []
+
+    # Add to visited set
+    visited = visited.copy()  # Create new copy to avoid modifying parent's set
+    visited.add(unique_key)
+
+    downstream = []
+
+    # Stop recursion if we've reached max depth
+    if max_depth > 0 and current_depth >= max_depth:
+        return downstream
+
+    # Find downstream relations for any item type
+    if item_type in ("entity", "automation", "script"):
+        downstream.extend(
+            _find_downstream_for_item(
+                item_id,
+                item_type,
+                automations,
+                scripts,
+                entities,
+                max_depth,
+                current_depth,
+                visited,
+            )
+        )
+
+    return downstream
+
+
+def _find_downstream_for_item(
+    item_id: str,
+    item_type: str,
+    automations: dict[str, Any],
+    scripts: dict[str, Any],
+    entities: dict[str, Any],
+    max_depth: int,
+    current_depth: int,
+    visited: set[str],
+) -> list[dict[str, Any]]:
+    """Find downstream relations for any item type."""
+    downstream = []
+
+    # For entities: find automations/scripts that use this entity, and entities that depend on this entity
+    if item_type == "entity":
+        # Find automations that use this entity in triggers or conditions
+        for automation_data in automations.get("automations", []):
+            # Determine relation type based on how entity is used
+            relation_type = "trigger"
+            if item_id in automation_data.get("conditions", []):
+                relation_type = "condition"
+            elif item_id in automation_data.get("triggers", []):
+                relation_type = "trigger"
+            else:
+                continue  # Entity not used by this automation
+
+            friendly_name = automation_data.get("friendly_name", automation_data["id"])
+            downstream_item = {
+                "item_type": "automation",
+                "item_id": automation_data["id"],
+                "friendly_name": friendly_name,
+                "relation_type": relation_type,  # How the entity is used by this automation
+                "upstream": [],
+                "downstream": [],
+            }
+
+            # Recursively process downstream for this automation
+            if max_depth == 0 or current_depth < max_depth - 1:
+                downstream_item["downstream"] = process_downstream(
+                    max_depth,
+                    automations,
+                    scripts,
+                    entities,
+                    "automation",
+                    automation_data["id"],
+                    current_depth + 1,
+                    visited,
+                )
+
+            downstream.append(downstream_item)
+
+        # Find scripts that use this entity in conditions/triggers
+        for script_data in scripts.get("scripts", []):
+            relation_type = None
+            if item_id in script_data.get("conditions", []):
+                relation_type = "condition"
+            elif item_id in script_data.get(
+                "triggers", []
+            ):  # Scripts can have triggers too
+                relation_type = "trigger"
+            else:
+                continue  # Entity not used by this script
+
+            friendly_name = script_data.get("friendly_name", script_data["id"])
+            downstream_item = {
+                "item_type": "script",
+                "item_id": script_data["id"],
+                "friendly_name": friendly_name,
+                "relation_type": relation_type,  # How the entity is used by this script
+                "upstream": [],
+                "downstream": [],
+            }
+
+            # Recursively process downstream for this script
+            if max_depth == 0 or current_depth < max_depth - 1:
+                downstream_item["downstream"] = process_downstream(
+                    max_depth,
+                    automations,
+                    scripts,
+                    entities,
+                    "script",
+                    script_data["id"],
+                    current_depth + 1,
+                    visited,
+                )
+
+            downstream.append(downstream_item)
+
+        # Find entities that depend on this entity (template sensors, utility meters, etc.)
+        for entity_data in entities.get("entities", []):
+            relation_type = None
+            if item_id in entity_data.get("triggers", []):
+                relation_type = "trigger"
+            elif item_id in entity_data.get("conditions", []):
+                relation_type = "condition"
+            else:
+                continue  # Entity doesn't depend on this entity
+
+            friendly_name = entity_data.get("friendly_name", entity_data["id"])
+            downstream_item = {
+                "item_type": "entity",
+                "item_id": entity_data["id"],
+                "friendly_name": friendly_name,
+                "relation_type": relation_type,  # How this entity depends on the source entity
+                "upstream": [],
+                "downstream": [],
+            }
+
+            # Recursively process downstream for this entity
+            if max_depth == 0 or current_depth < max_depth - 1:
+                downstream_item["downstream"] = process_downstream(
+                    max_depth,
+                    automations,
+                    scripts,
+                    entities,
+                    "entity",
+                    entity_data["id"],
+                    current_depth + 1,
+                    visited,
+                )
+
+            downstream.append(downstream_item)
+
+    # For automations/scripts: find their outputs (entities they control and scripts they call)
+    elif item_type in ("automation", "script"):
+        # Get the data collection based on item type
+        if item_type == "automation":
+            data_collection = automations.get("automations", [])
+        else:
+            data_collection = scripts.get("scripts", [])
+
+        # Find the specific item
+        for item_data in data_collection:
+            if item_data["id"] == item_id:
+                # Add outputs as downstream
+                for output_item in item_data.get("outputs", []):
+                    # Skip service calls and device outputs for now
+                    if output_item.startswith(("service:", "device:")):
+                        continue
+
+                    # Determine if this is a script call or entity
+                    if output_item.startswith("script."):
+                        downstream_item_type = "script"
+                    else:
+                        downstream_item_type = "entity"
+
+                    friendly_name = _get_friendly_name(
+                        output_item, automations, scripts, entities
+                    )
+                    downstream_item = {
+                        "item_type": downstream_item_type,
+                        "item_id": output_item,
+                        "friendly_name": friendly_name,
+                        "relation_type": "output",
+                        "upstream": [],
+                        "downstream": [],
+                    }
+
+                    # Recursively process downstream for this output
+                    if max_depth == 0 or current_depth < max_depth - 1:
+                        downstream_item["downstream"] = process_downstream(
+                            max_depth,
+                            automations,
+                            scripts,
+                            entities,
+                            downstream_item_type,
+                            output_item,
+                            current_depth + 1,
+                            visited,
+                        )
+
+                    downstream.append(downstream_item)
+                break
+
+    return downstream
+
+
+def _get_friendly_name(
+    item_id: str,
+    automations: dict[str, Any],
+    scripts: dict[str, Any],
+    entities: dict[str, Any],
+) -> str:
+    """Get friendly name for an item."""
+    # Check entities first
+    for entity_data in entities.get("entities", []):
+        if entity_data["id"] == item_id:
+            return entity_data.get("friendly_name", item_id)
+
+    # Check automations
+    for automation_data in automations.get("automations", []):
+        if automation_data["id"] == item_id:
+            return automation_data.get("friendly_name", item_id)
+
+    # Check scripts
+    for script_data in scripts.get("scripts", []):
+        if script_data["id"] == item_id:
+            return script_data.get("friendly_name", item_id)
+
+    # Return the item_id as fallback
+    return item_id
