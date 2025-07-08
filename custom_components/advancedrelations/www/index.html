@@ -240,6 +240,7 @@
             <button id="download-btn">Download JSON</button>
             <button id="fit-btn">Fit View</button>
             <button id="reset-zoom-btn">Reset Zoom</button>
+            <button id="layout-toggle-btn">Hierarchical Layout</button>
         </div>
         <div id="network-container"></div>
         <div id="no-selection-message" style="padding: 40px; text-align: center; color: #666; font-size: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
@@ -290,6 +291,9 @@
         var nodeIds = new Set();
         var edgeId = 0;
 
+        // Track edges to prevent duplicates
+        var edgeMap = new Map();
+
         // Color scheme for different types
         var colors = {
             entity: { background: '#e3f2fd', border: '#2196f3' },
@@ -302,14 +306,15 @@
         };
 
         function createNodeId(type, id, relationship, level) {
-            return `${type}_${id}_${relationship || 'main'}_${level}`;
+            // Use only type and id to ensure each item appears only once
+            return `${type}_${id}`;
         }
 
         function addNode(type, id, label, relationship, level, isMain = false) {
             var nodeId = createNodeId(type, id, relationship, level);
             if (nodeIds.has(nodeId)) return nodeId;
 
-            var color = isMain ? colors.selected : colors[relationship] || colors[type];
+            var color = isMain ? colors.selected : colors[type];
             var shape = type === 'automation' ? 'box' : type === 'script' ? 'diamond' : 'ellipse';
 
             // Create a display label that prioritizes friendly names
@@ -328,7 +333,8 @@
                 label: displayLabel,
                 color: color,
                 shape: shape,
-                font: { size: isMain ? 16 : 12, color: '#333' },
+                font: { size: isMain ? 16 : 12, color: '#333', bold: isMain },
+                borderWidth: isMain ? 4 : 2,
                 level: level,
                 type: type,
                 originalId: id,
@@ -341,15 +347,66 @@
         }
 
         function addEdge(fromId, toId, label, color = '#666') {
-            edges.add({
-                id: edgeId++,
-                from: fromId,
-                to: toId,
-                label: label,
-                color: { color: color },
-                arrows: { to: { enabled: true, scaleFactor: 0.8 } },
-                font: { size: 10, color: '#666' }
+            var edgeKey = `${fromId}->${toId}`;
+
+            if (edgeMap.has(edgeKey)) {
+                // Edge already exists, add this label (allow duplicates for counting)
+                var existingEdge = edgeMap.get(edgeKey);
+                var existingLabels = existingEdge.labels || [];
+
+                // Always add the label to count duplicates
+                existingLabels.push(label);
+                existingEdge.labels = existingLabels;
+
+                // Create smart combined label
+                var combinedLabel = createCombinedLabel(existingLabels);
+
+                // Update existing edge
+                edges.update({
+                    id: existingEdge.id,
+                    label: combinedLabel
+                });
+            } else {
+                // New edge
+                var newEdge = {
+                    id: edgeId++,
+                    from: fromId,
+                    to: toId,
+                    label: label,
+                    color: { color: color },
+                    arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+                    font: { size: 10, color: '#666' },
+                    labels: [label]
+                };
+
+                edges.add(newEdge);
+                edgeMap.set(edgeKey, newEdge);
+            }
+        }
+
+        function createCombinedLabel(labels) {
+            if (labels.length === 1) {
+                return labels[0];
+            }
+
+            // Count occurrences of each label type
+            var labelCounts = {};
+            labels.forEach(function(label) {
+                labelCounts[label] = (labelCounts[label] || 0) + 1;
             });
+
+            // Create combined label
+            var parts = [];
+            Object.keys(labelCounts).forEach(function(labelType) {
+                var count = labelCounts[labelType];
+                if (count > 1) {
+                    parts.push(`${labelType} (${count})`);
+                } else {
+                    parts.push(labelType);
+                }
+            });
+
+            return parts.join(', ');
         }
 
         // Add main node (selected item)
@@ -416,16 +473,19 @@
 
         var options = {
             layout: {
-                hierarchical: {
-                    enabled: true,
-                    direction: 'UD', // Up-Down
-                    sortMethod: 'directed',
-                    nodeSpacing: 200,
-                    levelSeparation: 150
-                }
+                improvedLayout: true,
+                clusterThreshold: 150
             },
             physics: {
-                enabled: false
+                enabled: true,
+                stabilization: { iterations: 100 },
+                barnesHut: {
+                    gravitationalConstant: -8000,
+                    centralGravity: 0.3,
+                    springLength: 95,
+                    springConstant: 0.04,
+                    damping: 0.09
+                }
             },
             nodes: {
                 font: { size: 12 },
@@ -435,7 +495,11 @@
             edges: {
                 smooth: {
                     enabled: true,
-                    type: 'continuous'
+                    type: 'dynamic',
+                    roundness: 0.5
+                },
+                arrows: {
+                    to: { enabled: true, scaleFactor: 0.8 }
                 }
             },
             interaction: {
@@ -696,6 +760,57 @@
         if (network) {
           network.moveTo({scale: 1.0});
         }
+      });
+
+      // Add layout toggle functionality
+      var isHierarchical = false;
+      document.getElementById('layout-toggle-btn').addEventListener('click', function() {
+        if (!network || !networkData) return;
+
+        isHierarchical = !isHierarchical;
+        var options;
+
+        if (isHierarchical) {
+          // Hierarchical layout
+          options = {
+            layout: {
+              hierarchical: {
+                enabled: true,
+                direction: 'UD',
+                sortMethod: 'directed',
+                nodeSpacing: 200,
+                levelSeparation: 150
+              }
+            },
+            physics: {
+              enabled: false
+            }
+          };
+          this.textContent = 'Force Layout';
+        } else {
+          // Force-directed layout
+          options = {
+            layout: {
+              improvedLayout: true,
+              clusterThreshold: 150
+            },
+            physics: {
+              enabled: true,
+              stabilization: { iterations: 100 },
+              barnesHut: {
+                gravitationalConstant: -8000,
+                centralGravity: 0.3,
+                springLength: 95,
+                springConstant: 0.04,
+                damping: 0.09
+              }
+            }
+          };
+          this.textContent = 'Hierarchical Layout';
+        }
+
+        network.setOptions(options);
+        network.fit();
       });      // Add depth change event listener
       document.getElementById('depth-input').addEventListener('input', function() {
         var depthValue = parseInt(this.value);
