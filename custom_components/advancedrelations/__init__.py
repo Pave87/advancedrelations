@@ -1,873 +1,342 @@
-"""Integration for Advanced relations."""
+"""Integration for Advanced Relations.
+
+This integration provides a comprehensive view of relationships between Home Assistant entities,
+automations, and scripts. It analyzes YAML configurations to build interactive relationship trees
+showing how different components trigger, condition, and affect each other.
+
+Key Features:
+- Entity relationship mapping (what triggers/uses/modifies each entity)
+- Automation dependency analysis (trigger chains, condition dependencies)
+- Script call hierarchies and entity interactions
+- Interactive web panel for visualization
+- Deep YAML parsing with template extraction
+
+The integration exposes HTTP endpoints for frontend communication and maintains cached
+data structures for efficient relationship analysis.
+"""
 
 from __future__ import annotations
-from pathlib import Path
-import logging
-import yaml
-from typing import Any
 
-from .const import DOMAIN
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.http import HomeAssistantView
+from homeassistant.helpers.typing import ConfigType
 
+from .data_loader import (
+    get_automations,
+    get_entities,
+    get_scripts,
+    list_automations,
+    list_entities,
+    list_scripts,
+)
+from .relations_analyzer import find_comprehensive_relations
 
 _LOGGER = logging.getLogger(__name__)
 
 
-_Entities: list[dict[str, Any]] = []
-_Automations: list[dict[str, str]] = []  # Each dict: {"id": ..., "alias": ...}
-_Scripts: list[dict[str, str]] = []  # Each dict: {"id": ..., "alias": ...}
-_Templates: list[dict[str, Any]]
-
-
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the Advanced relations integration from yaml (noop)."""
-    _LOGGER.warning("=== ADVANCED RELATIONS INTEGRATION SETUP CALLED ===")
+    """Set up the Advanced Relations integration from YAML configuration.
+
+    This function is called when the integration is configured via YAML in configuration.yaml.
+    Currently this integration is designed to work primarily through config entries (UI setup),
+    so this function serves mainly as a placeholder and logs a warning for debugging purposes.
+
+    Args:
+        hass: The Home Assistant instance
+        config: The YAML configuration data for this integration
+
+    Returns:
+        bool: Always returns True to indicate successful setup
+
+    """
+    _LOGGER.warning("Advanced Relations integration setup called")
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Advanced relations from a config entry."""
+    """Set up Advanced Relations from a config entry.
+
+    This is the main setup function that configures the integration when added through the UI.
+    It performs the following setup tasks:
+
+    1. Registers static file serving for the web panel assets
+    2. Creates and registers the iframe panel in the Home Assistant frontend
+    3. Registers all HTTP API endpoints for data access and relationship analysis
+
+    The integration creates a custom panel accessible from the sidebar that provides
+    an interactive interface for exploring entity relationships.
+
+    Args:
+        hass: The Home Assistant instance
+        entry: The config entry containing integration configuration
+
+    Returns:
+        bool: True if setup was successful
+
+    """
+    # Import frontend here to avoid circular imports during HA startup
     from homeassistant.components import frontend
 
+    # Register static file serving for the web panel
+    # This serves HTML, CSS, JS files from the www directory to the frontend
     hass.http.register_static_path(
-        "/advancedrelations-panel",
-        hass.config.path("custom_components/advancedrelations/www"),
-        cache_headers=True,
+        "/advancedrelations-panel",  # URL path where files will be served
+        hass.config.path(
+            "custom_components/advancedrelations/www"
+        ),  # Local filesystem path
+        cache_headers=True,  # Enable browser caching for better performance
     )
+
+    # Register the Advanced Relations panel in the Home Assistant sidebar
+    # This creates an iframe panel that loads our custom web interface
     frontend.async_register_built_in_panel(
         hass,
-        component_name="iframe",
-        sidebar_title="Advanced Relations",
-        sidebar_icon="mdi:graph",
-        frontend_url_path="advancedrelations-panel",
-        config={"url": "/advancedrelations-panel/index.html"},
-        require_admin=True,
+        component_name="iframe",  # Use iframe panel type to embed custom HTML
+        sidebar_title="Advanced Relations",  # Text shown in the sidebar
+        sidebar_icon="mdi:graph",  # Material Design Icon for the sidebar
+        frontend_url_path="advancedrelations-panel",  # URL path for the panel
+        config={"url": "/advancedrelations-panel/index.html"},  # URL to load in iframe
+        require_admin=True,  # Restrict access to admin users only
     )
-    hass.http.register_view(AdvancedRelationsTriggerView)
-    hass.http.register_view(AdvancedRelationsDataView)
-    hass.http.register_view(AdvancedRelationsRelatedView)
+
+    # Register HTTP API endpoints for frontend communication
+    # These endpoints provide data access and relationship analysis functionality
+    hass.http.register_view(AdvancedRelationsTriggerView)  # Trigger backend processing
+    hass.http.register_view(
+        AdvancedRelationsDataView
+    )  # Get entities/automations/scripts data
+    hass.http.register_view(AdvancedRelationsRelatedView)  # Get relationship trees
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry for Advanced relations."""
+    """Unload a config entry for Advanced Relations.
+
+    Called when the integration is being removed or reloaded. Currently this integration
+    doesn't maintain any persistent state or background tasks that need cleanup, so this
+    function simply returns True to indicate successful unload.
+
+    Args:
+        hass: The Home Assistant instance
+        entry: The config entry being unloaded
+
+    Returns:
+        bool: True indicating successful unload
+
+    """
     return True
 
 
-async def list_entities(hass):
-    """List all entities with their entity_id and friendly_name."""
-    _Entities.clear()
-    for state in hass.states.async_all():
-        friendly_name = state.attributes.get("friendly_name", state.entity_id)
-        _Entities.append({"entity_id": state.entity_id, "friendly_name": friendly_name})
-    _LOGGER.info("=== Entities with friendly names read and stored in _Entities ===")
-
-
-async def list_automations(hass):
-    """List all automations as dicts with id and alias, and keep id->alias mapping for fast lookup."""
-    _Automations.clear()
-    automations_path = Path(hass.config.path("automations.yaml"))
-    if automations_path.exists():
-        try:
-            content = await hass.async_add_executor_job(automations_path.read_text)
-            yaml_data = yaml.safe_load(content)
-            if isinstance(yaml_data, list):
-                for automation in yaml_data:
-                    if isinstance(automation, dict) and "id" in automation:
-                        alias = automation.get("alias", str(automation["id"]))
-                        entry = {"id": str(automation["id"]), "alias": alias}
-                        _Automations.append(entry)
-        except yaml.YAMLError as err:
-            _LOGGER.error("Failed to parse automations.yaml: %s", err)
-    _LOGGER.info(
-        "=== Automations read and stored in _Automations and _AutomationIdToAlias ==="
-    )
-
-
-async def list_scripts(hass):
-    """List all scripts as dicts with id and alias."""
-    _Scripts.clear()
-    scripts_path = Path(hass.config.path("scripts.yaml"))
-    if scripts_path.exists():
-        try:
-            content = await hass.async_add_executor_job(scripts_path.read_text)
-            yaml_data = yaml.safe_load(content)
-            if isinstance(yaml_data, dict):
-                for script_id, script in yaml_data.items():
-                    if isinstance(script, dict):
-                        alias = script.get("alias", script_id)
-                        entry = {"id": script_id, "alias": alias}
-                        _Scripts.append(entry)
-        except yaml.YAMLError as err:
-            _LOGGER.error("Failed to parse scripts.yaml: %s", err)
-    _LOGGER.info("=== Scripts read and stored in _Scripts ===")
-
-
 class AdvancedRelationsTriggerView(HomeAssistantView):
-    """View to trigger backend processing when the page is opened."""
+    """HTTP endpoint for triggering backend data processing when the frontend panel loads.
+
+    This view provides a POST endpoint that the frontend can call to trigger the backend
+    to refresh its cached data. This is useful when the user opens the panel to ensure
+    they're working with the most current entity, automation, and script data.
+
+    The endpoint performs the following operations:
+    1. Refreshes the entities cache from the current Home Assistant state
+    2. Re-parses automations.yaml to update automation data
+    3. Re-parses scripts.yaml to update script data
+
+    Attributes:
+        url: The HTTP endpoint path for this view
+        name: The internal name for this view (used for routing)
+        requires_auth: Set to False to allow unauthenticated access for internal panel use
+
+    """
 
     url = "/api/advancedrelations/trigger"
     name = "api:advancedrelations:trigger"
     requires_auth = False  # Allow unauthenticated access for internal panel use
 
     async def post(self, request):
-        """Trigger backend processing when called from the frontend."""
-        _LOGGER.warning("=== POST /api/advancedrelations/trigger called ===")
+        """Handle POST requests to trigger backend data processing.
+
+        This method is called when the frontend sends a POST request to refresh backend data.
+        It calls all the data loading functions to ensure the cached data is current.
+
+        Args:
+            request: The HTTP request object containing Home Assistant context
+
+        Returns:
+            JSON response indicating the trigger was successful
+
+        Note:
+            This method logs a warning for debugging purposes to track when data
+            refresh operations are triggered by the frontend.
+
+        """
+        _LOGGER.warning("POST /api/advancedrelations/trigger called")
         hass = request.app["hass"]
-        # Call your backend processing function
-        await list_entities(hass)
-        await list_automations(hass)
-        await list_scripts(hass)
+
+        # Refresh all cached data by calling the data loading functions
+        await list_entities(hass)  # Refresh entity cache
+        await list_automations(hass)  # Refresh automation cache
+        await list_scripts(hass)  # Refresh script cache
+
         return self.json({"status": "triggered"})
 
 
 class AdvancedRelationsDataView(HomeAssistantView):
-    """View to provide entities, automations, and scripts as JSON."""
+    """HTTP endpoint for providing entity, automation, and script data to the frontend.
+
+    This view exposes a GET endpoint that returns all currently cached data about
+    entities, automations, and scripts in JSON format. The frontend uses this data
+    to populate dropdown lists and provide item selection interfaces.
+
+    The returned JSON structure contains:
+    - entities: List of all entities with their IDs and friendly names
+    - automations: List of all automations with their IDs and aliases
+    - scripts: List of all scripts with their IDs and aliases
+
+    Attributes:
+        url: The HTTP endpoint path for this view
+        name: The internal name for this view (used for routing)
+        requires_auth: Set to False to allow unauthenticated access for internal panel use
+
+    """
 
     url = "/api/advancedrelations/data"
     name = "api:advancedrelations:data"
     requires_auth = False
 
     async def get(self, request):
+        """Handle GET requests for cached entity, automation, and script data.
+
+        This method refreshes all cached data and returns it in JSON format for
+        consumption by the frontend. The data is refreshed on each request to
+        ensure the frontend always receives current information.
+
+        Args:
+            request: The HTTP request object containing Home Assistant context
+
+        Returns:
+            JSON response containing entities, automations, and scripts data in the format:
+            {
+                "entities": [{"entity_id": "...", "friendly_name": "..."}],
+                "automations": [{"id": "...", "alias": "..."}],
+                "scripts": [{"id": "...", "alias": "..."}]
+            }
+
+        """
         hass = request.app["hass"]
-        await list_entities(hass)
-        await list_automations(hass)
-        await list_scripts(hass)
+
+        # Refresh all cached data before returning it
+        await list_entities(hass)  # Ensure entity data is current
+        await list_automations(hass)  # Ensure automation data is current
+        await list_scripts(hass)  # Ensure script data is current
+
+        # Return the cached data in JSON format
         return self.json(
             {
-                "entities": _Entities,
-                "automations": _Automations,
-                "scripts": _Scripts,
+                "entities": get_entities(),
+                "automations": get_automations(),
+                "scripts": get_scripts(),
             }
         )
 
 
 class AdvancedRelationsRelatedView(HomeAssistantView):
-    """View to provide related automations/scripts/entities for a selected item."""
+    """HTTP endpoint for generating relationship trees for selected entities, automations, or scripts.
+
+    This is the core functionality endpoint that analyzes relationships between Home Assistant
+    components and returns comprehensive relationship trees. The endpoint accepts query parameters
+    specifying the type (entity/automation/script) and ID of the item to analyze.
+
+    The relationship analysis includes:
+    - Triggers: What causes this item to activate or change
+    - Conditions: What this item depends on or checks
+    - Outputs: What this item affects or modifies
+
+    The analysis works by parsing YAML configurations and building a tree structure that
+    shows direct and indirect relationships between components, helping users understand
+    the complex interdependencies in their Home Assistant setup.
+
+    Attributes:
+        url: The HTTP endpoint path for this view
+        name: The internal name for this view (used for routing)
+        requires_auth: Set to False to allow unauthenticated access for internal panel use
+
+    """
 
     url = "/api/advancedrelations/related"
     name = "api:advancedrelations:related"
     requires_auth = False
 
     async def get(self, request):
-        """Return a tree of related items for the selected entity/automation/script."""
+        """Handle GET requests for relationship tree analysis.
+
+        This method analyzes the relationships for a specified entity, automation, or script
+        and returns a comprehensive tree structure showing all related components and how
+        they interact.
+
+        Query Parameters:
+            type (str): The type of item to analyze ('entity', 'automation', or 'script')
+            id (str): The ID of the item to analyze
+
+        Args:
+            request: The HTTP request object containing query parameters and Home Assistant context
+
+        Returns:
+            JSON response containing either:
+            - Success: {"relations": relationship_structure}
+            - Error: {"error": error_message} with appropriate HTTP status code
+
+        Raises:
+            400: If required query parameters (type or id) are missing
+            500: If there's an error during relationship analysis
+
+        Note:
+            This method refreshes all cached data before analysis to ensure accuracy,
+            then uses the relations analyzer to perform the actual relationship analysis.
+
+        """
         hass = request.app["hass"]
-        await list_entities(hass)
-        await list_automations(hass)
-        await list_scripts(hass)
-        q_type = request.query.get("type")
-        q_id = request.query.get("id")
+
+        # Refresh all cached data to ensure we're working with current information
+        await list_entities(hass)  # Refresh entity cache
+        await list_automations(hass)  # Refresh automation cache
+        await list_scripts(hass)  # Refresh script cache
+
+        # Extract and validate query parameters
+        q_type = request.query.get("type")  # Type of item (entity/automation/script)
+        q_id = request.query.get("id")  # ID of the specific item to analyze
+        q_depth = request.query.get("depth", "3")  # Recursion depth (default: 3)
+
+        # Validate that required parameters are present
         if not q_type or not q_id:
             return self.json({"error": "Missing type or id"}, status_code=400)
 
+        # Validate and parse depth parameter
         try:
-            builder = RelationsTreeBuilder(hass)
-            tree = builder.build_relations_tree(q_type, q_id)
-            return self.json({"root": tree})
-        except (yaml.YAMLError, FileNotFoundError, KeyError) as err:
+            depth = int(q_depth)
+            if depth < 0:
+                return self.json(
+                    {"error": "Depth must be 0 or a positive number"}, status_code=400
+                )
+            # Convert 0 to a very large number to represent "infinite" depth
+            if depth == 0:
+                depth = 999  # Effectively infinite for practical purposes
+        except ValueError:
+            return self.json({"error": "Invalid depth parameter"}, status_code=400)
+
+        try:
+            # Get comprehensive relationships using the relations analyzer
+            relations = find_comprehensive_relations(
+                hass, q_type, q_id, max_depth=depth
+            )
+
+            # Return the relationship structure
+            return self.json({"relations": relations})
+
+        except (ValueError, KeyError, FileNotFoundError) as err:
+            # Log the error for debugging and return a user-friendly error response
             _LOGGER.error("Error building relations tree: %s", err)
             return self.json(
                 {"error": f"Failed to build relations tree: {err}"}, status_code=500
             )
-
-
-class RelationsTreeBuilder:
-    """Helper class to build relations trees."""
-
-    def __init__(self, hass):
-        """Initialize the builder."""
-        self.hass = hass
-        self._automations_data = None
-        self._scripts_data = None
-
-    def _safe_get_list(self, data, key, default=None):
-        """Safely get a list from dict, handling None values."""
-        if default is None:
-            default = []
-        value = data.get(key, default)
-        return value if value is not None else default
-
-    def get_automations_data(self):
-        """Get cached automations data."""
-        if self._automations_data is None:
-            automations_path = Path(self.hass.config.path("automations.yaml"))
-            if automations_path.exists():
-                try:
-                    content = automations_path.read_text()
-                    self._automations_data = yaml.safe_load(content) or []
-                except (yaml.YAMLError, FileNotFoundError) as err:
-                    _LOGGER.error("Failed to parse automations.yaml: %s", err)
-                    self._automations_data = []
-            else:
-                self._automations_data = []
-        return self._automations_data
-
-    def get_scripts_data(self):
-        """Get cached scripts data."""
-        if self._scripts_data is None:
-            scripts_path = Path(self.hass.config.path("scripts.yaml"))
-            if scripts_path.exists():
-                try:
-                    content = scripts_path.read_text()
-                    self._scripts_data = yaml.safe_load(content) or {}
-                except (yaml.YAMLError, FileNotFoundError) as err:
-                    _LOGGER.error("Failed to parse scripts.yaml: %s", err)
-                    self._scripts_data = {}
-            else:
-                self._scripts_data = {}
-        return self._scripts_data
-
-    def get_entity_friendly_name(self, entity_id):
-        """Get friendly name for entity."""
-        for ent in _Entities:
-            if ent["entity_id"] == entity_id:
-                return ent.get("friendly_name", entity_id)
-        return entity_id
-
-    def get_automation_label(self, automation):
-        """Get label for automation."""
-        return f"{automation.get('alias', automation.get('id', '?'))} ({automation.get('id', '?')})"
-
-    def get_script_label(self, script_id, script):
-        """Get label for script."""
-        return f"{script.get('alias', script_id)} ({script_id})"
-
-    def extract_entities_from_value(self, value):
-        """Recursively extract entity IDs from any YAML structure."""
-        entities = set()
-        if isinstance(value, str):
-            # Check if it looks like an entity ID (domain.entity_name)
-            if (
-                "." in value
-                and not value.startswith("{{")
-                and not value.startswith("{%")
-            ):
-                # Basic entity ID pattern check
-                parts = value.split(".")
-                if len(parts) == 2 and parts[0] and parts[1]:
-                    # Avoid false positives like file paths, URLs, etc.
-                    if not any(char in value for char in ["/", "://", "@", " "]):
-                        entities.add(value)
-            # Also extract from templates (basic extraction)
-            elif "{{" in value or "{%" in value:
-                import re
-
-                # Extract entity IDs from templates like {{ states('sensor.temperature') }}
-                template_entities = re.findall(r'states\([\'"]([^\'")]+)[\'"]\)', value)
-                for entity_id in template_entities:
-                    if "." in entity_id:
-                        entities.add(entity_id)
-                # Extract from state_attr calls
-                state_attr_entities = re.findall(
-                    r'state_attr\([\'"]([^\'")]+)[\'"]\s*,', value
-                )
-                for entity_id in state_attr_entities:
-                    if "." in entity_id:
-                        entities.add(entity_id)
-                # Extract from is_state calls
-                is_state_entities = re.findall(
-                    r'is_state\([\'"]([^\'")]+)[\'"]\s*,', value
-                )
-                for entity_id in is_state_entities:
-                    if "." in entity_id:
-                        entities.add(entity_id)
-        elif isinstance(value, list):
-            for item in value:
-                entities.update(self.extract_entities_from_value(item))
-        elif isinstance(value, dict):
-            for key, val in value.items():
-                if key in ["entity_id", "entity_ids"]:
-                    entities.update(self.extract_entities_from_value(val))
-                elif key == "target" and isinstance(val, dict):
-                    entities.update(
-                        self.extract_entities_from_value(val.get("entity_id", []))
-                    )
-                elif key in ["device_id", "area_id"]:
-                    # Skip device and area IDs
-                    continue
-                else:
-                    # Recursively check nested structures
-                    entities.update(self.extract_entities_from_value(val))
-        return entities
-
-    def find_triggers_in_automation(self, automation):
-        """Find all trigger entities in an automation."""
-        triggers = set()
-        for trigger_list in [
-            automation.get("trigger", []),
-            automation.get("triggers", []),
-        ]:
-            for trig in (
-                trigger_list if isinstance(trigger_list, list) else [trigger_list]
-            ):
-                if isinstance(trig, dict):
-                    triggers.update(self.extract_entities_from_value(trig))
-        return triggers
-
-    def find_conditions_in_automation(self, automation):
-        """Find all condition entities in an automation."""
-        conditions = set()
-        for condition_list in [
-            automation.get("condition", []),
-            automation.get("conditions", []),
-        ]:
-            for cond in (
-                condition_list if isinstance(condition_list, list) else [condition_list]
-            ):
-                if isinstance(cond, dict):
-                    conditions.update(self.extract_entities_from_value(cond))
-
-        # Also check conditions in action blocks (like choose, if, etc.)
-        for action_list in [
-            automation.get("action", []),
-            automation.get("actions", []),
-        ]:
-            for action in (
-                action_list if isinstance(action_list, list) else [action_list]
-            ):
-                if isinstance(action, dict):
-                    conditions.update(self.find_conditions_in_action_block(action))
-        return conditions
-
-    def find_conditions_in_action_block(self, action):
-        """Recursively find conditions in action blocks."""
-        conditions = set()
-        if isinstance(action, dict):
-            # Check if this action has conditions
-            for cond in action.get("condition", []):
-                if isinstance(cond, dict):
-                    conditions.update(self.extract_entities_from_value(cond))
-
-            # Check choose/if blocks
-            if "choose" in action:
-                for choice in action["choose"]:
-                    if isinstance(choice, dict):
-                        for cond in choice.get("conditions", []):
-                            conditions.update(self.extract_entities_from_value(cond))
-                        # Recursively check sequence actions
-                        sequence = self._safe_get_list(choice, "sequence")
-                        for seq_action in sequence:
-                            conditions.update(
-                                self.find_conditions_in_action_block(seq_action)
-                            )
-
-            # Check if blocks
-            if "if" in action:
-                conditions.update(self.extract_entities_from_value(action["if"]))
-                then_actions = self._safe_get_list(action, "then")
-                for seq_action in then_actions:
-                    conditions.update(self.find_conditions_in_action_block(seq_action))
-                else_actions = self._safe_get_list(action, "else")
-                for seq_action in else_actions:
-                    conditions.update(self.find_conditions_in_action_block(seq_action))
-
-            # Check repeat blocks
-            if "repeat" in action:
-                repeat_block = action["repeat"]
-                if isinstance(repeat_block, dict):
-                    conditions.update(
-                        self.extract_entities_from_value(repeat_block.get("until", {}))
-                    )
-                    conditions.update(
-                        self.extract_entities_from_value(repeat_block.get("while", {}))
-                    )
-                    sequence = self._safe_get_list(repeat_block, "sequence")
-                    for seq_action in sequence:
-                        conditions.update(
-                            self.find_conditions_in_action_block(seq_action)
-                        )
-
-        return conditions
-
-    def find_outputs_in_automation(self, automation):
-        """Find all output entities in an automation."""
-        outputs = set()
-        for action_list in [
-            automation.get("action", []),
-            automation.get("actions", []),
-        ]:
-            for action in (
-                action_list if isinstance(action_list, list) else [action_list]
-            ):
-                if isinstance(action, dict):
-                    outputs.update(self.find_outputs_in_action_block(action))
-        return outputs
-
-    def find_outputs_in_action_block(self, action):
-        """Recursively find outputs in action blocks."""
-        outputs = set()
-        if isinstance(action, dict):
-            # Services that modify entities
-            service_actions = ["service", "action"]
-            for service_key in service_actions:
-                if service_key in action:
-                    service = action[service_key]
-                    # Check for entity modifications
-                    service_keywords = [
-                        "turn_on",
-                        "turn_off",
-                        "toggle",
-                        "set_",
-                        "call",
-                        "trigger",
-                        "start",
-                        "stop",
-                        "pause",
-                        "play",
-                    ]
-                    if any(
-                        keyword in str(service).lower() for keyword in service_keywords
-                    ):
-                        outputs.update(
-                            self.extract_entities_from_value(
-                                action.get("entity_id", [])
-                            )
-                        )
-                        outputs.update(
-                            self.extract_entities_from_value(action.get("target", {}))
-                        )
-
-                    # Script and automation calls
-                    service_str = str(service).lower()
-                    if "script." in service_str or "automation." in service_str:
-                        if "entity_id" in action:
-                            entity_ids = action["entity_id"]
-                            if isinstance(entity_ids, str):
-                                outputs.add(f"script_call:{entity_ids}")
-                            elif isinstance(entity_ids, list):
-                                for eid in entity_ids:
-                                    outputs.add(f"script_call:{eid}")
-                        if "target" in action and isinstance(action["target"], dict):
-                            target_entities = self._safe_get_list(
-                                action["target"], "entity_id"
-                            )
-                            if isinstance(target_entities, str):
-                                outputs.add(f"script_call:{target_entities}")
-                            elif isinstance(target_entities, list):
-                                for eid in target_entities:
-                                    outputs.add(f"script_call:{eid}")
-
-            # Direct entity_id assignments (for any service call)
-            outputs.update(
-                self.extract_entities_from_value(action.get("entity_id", []))
-            )
-            outputs.update(self.extract_entities_from_value(action.get("target", {})))
-
-            # Check nested blocks
-            if "choose" in action:
-                for choice in action["choose"]:
-                    if isinstance(choice, dict):
-                        for seq_action in self._safe_get_list(choice, "sequence"):
-                            outputs.update(
-                                self.find_outputs_in_action_block(seq_action)
-                            )
-
-            if "if" in action:
-                for seq_action in self._safe_get_list(action, "then"):
-                    outputs.update(self.find_outputs_in_action_block(seq_action))
-                for seq_action in self._safe_get_list(action, "else"):
-                    outputs.update(self.find_outputs_in_action_block(seq_action))
-
-            if "repeat" in action:
-                repeat_block = action["repeat"]
-                if isinstance(repeat_block, dict):
-                    for seq_action in self._safe_get_list(repeat_block, "sequence"):
-                        outputs.update(self.find_outputs_in_action_block(seq_action))
-
-        return outputs
-
-    def find_conditions_in_script(self, script):
-        """Find all condition entities in a script."""
-        conditions = set()
-        for step in self._safe_get_list(script, "sequence"):
-            if isinstance(step, dict):
-                conditions.update(self.find_conditions_in_action_block(step))
-        return conditions
-
-    def find_outputs_in_script(self, script):
-        """Find all output entities in a script."""
-        outputs = set()
-        for step in self._safe_get_list(script, "sequence"):
-            if isinstance(step, dict):
-                outputs.update(self.find_outputs_in_action_block(step))
-        return outputs
-
-    def build_relations_tree(
-        self, start_type, start_id, visited=None, max_depth=5, current_depth=0
-    ):
-        """Build a comprehensive relations tree with triggers, conditions, and outputs."""
-        if visited is None:
-            visited = set()
-
-        # Create unique key for this item
-        item_key = f"{start_type}:{start_id}"
-
-        # If we've already processed this item or reached max depth, return a reference
-        if item_key in visited or current_depth >= max_depth:
-            label = self._get_item_label(start_type, start_id)
-            return {
-                "label": f"{label} (already shown above)"
-                if item_key in visited
-                else label,
-                "type": start_type,
-                "id": start_id,
-                "children": [],
-                "is_reference": item_key in visited,
-            }
-
-        # Add to visited set
-        visited.add(item_key)
-
-        if start_type == "entity":
-            return self._build_entity_node(start_id, visited, max_depth, current_depth)
-
-        if start_type == "automation":
-            return self._build_automation_node(
-                start_id, visited, max_depth, current_depth
-            )
-
-        if start_type == "script":
-            return self._build_script_node(start_id, visited, max_depth, current_depth)
-
-        return {"label": start_id, "type": start_type, "id": start_id, "children": []}
-
-    def _get_item_label(self, start_type, start_id):
-        """Get label for any item type."""
-        if start_type == "entity":
-            return self.get_entity_friendly_name(start_id)
-
-        if start_type == "automation":
-            for auto in self.get_automations_data():
-                if str(auto.get("id")) == start_id:
-                    return self.get_automation_label(auto)
-            return start_id
-
-        if start_type == "script":
-            scripts_data = self.get_scripts_data()
-            script = scripts_data.get(start_id, {})
-            return self.get_script_label(start_id, script)
-
-        return start_id
-
-    def _build_entity_node(self, start_id, visited, max_depth, current_depth):
-        """Build node for entity."""
-        label = self.get_entity_friendly_name(start_id)
-        node = {
-            "label": label,
-            "type": "entity",
-            "id": start_id,
-            "children": [],
-            "triggers": [],
-            "conditions": [],
-            "outputs": [],
-        }
-
-        # Find automations where this entity is involved
-        for automation in self.get_automations_data():
-            auto_id = str(automation.get("id", ""))
-            if not auto_id:
-                continue
-
-            triggers = self.find_triggers_in_automation(automation)
-            conditions = self.find_conditions_in_automation(automation)
-            outputs = self.find_outputs_in_automation(automation)
-
-            if start_id in triggers:
-                child_node = self.build_relations_tree(
-                    "automation", auto_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "trigger"
-                node["triggers"].append(child_node)
-
-            if start_id in conditions:
-                child_node = self.build_relations_tree(
-                    "automation", auto_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "condition"
-                node["conditions"].append(child_node)
-
-            if start_id in outputs:
-                child_node = self.build_relations_tree(
-                    "automation", auto_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "output"
-                node["outputs"].append(child_node)
-
-        # Find scripts where this entity is involved
-        scripts_data = self.get_scripts_data()
-        for script_id, script in scripts_data.items():
-            conditions = self.find_conditions_in_script(script)
-            outputs = self.find_outputs_in_script(script)
-
-            if start_id in conditions:
-                child_node = self.build_relations_tree(
-                    "script", script_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "condition"
-                node["conditions"].append(child_node)
-
-            if start_id in outputs:
-                child_node = self.build_relations_tree(
-                    "script", script_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "output"
-                node["outputs"].append(child_node)
-
-        # Flatten children for display
-        node["children"] = node["triggers"] + node["conditions"] + node["outputs"]
-        return node
-
-    def _build_automation_node(self, start_id, visited, max_depth, current_depth):
-        """Build node for automation."""
-        # Find the automation
-        automation = None
-        for auto in self.get_automations_data():
-            if str(auto.get("id")) == start_id:
-                automation = auto
-                break
-
-        if not automation:
-            return {
-                "label": start_id,
-                "type": "automation",
-                "id": start_id,
-                "children": [],
-            }
-
-        label = self.get_automation_label(automation)
-        node = {
-            "label": label,
-            "type": "automation",
-            "id": start_id,
-            "children": [],
-            "triggers": [],
-            "conditions": [],
-            "outputs": [],
-        }
-
-        # Find other automations that trigger this automation
-        for other_automation in self.get_automations_data():
-            other_id = str(other_automation.get("id", ""))
-            if other_id != start_id:
-                outputs = self.find_outputs_in_automation(other_automation)
-                automation_calls = [
-                    f"script_call:automation.{start_id}",
-                    f"automation.{start_id}",
-                ]
-                if any(call in outputs for call in automation_calls):
-                    child_node = self.build_relations_tree(
-                        "automation",
-                        other_id,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "trigger"
-                    node["triggers"].append(child_node)
-
-        # Find scripts that trigger this automation
-        scripts_data = self.get_scripts_data()
-        for script_id, script in scripts_data.items():
-            outputs = self.find_outputs_in_script(script)
-            automation_calls = [
-                f"script_call:automation.{start_id}",
-                f"automation.{start_id}",
-            ]
-            if any(call in outputs for call in automation_calls):
-                child_node = self.build_relations_tree(
-                    "script", script_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "trigger"
-                node["triggers"].append(child_node)
-
-        # Get all entities involved in this automation
-        trigger_entities = self.find_triggers_in_automation(automation)
-        condition_entities = self.find_conditions_in_automation(automation)
-        output_entities = self.find_outputs_in_automation(automation)
-
-        # Add trigger entities
-        for entity_id in trigger_entities:
-            if not entity_id.startswith("script_call:"):
-                child_node = self.build_relations_tree(
-                    "entity", entity_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "trigger"
-                node["triggers"].append(child_node)
-
-        # Add condition entities
-        for entity_id in condition_entities:
-            if not entity_id.startswith("script_call:"):
-                child_node = self.build_relations_tree(
-                    "entity", entity_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "condition"
-                node["conditions"].append(child_node)
-
-        # Add output entities and called scripts/automations
-        for entity_id in output_entities:
-            if entity_id.startswith("script_call:"):
-                called_item = entity_id.replace("script_call:", "")
-                if called_item.startswith("script."):
-                    called_script_id = called_item.replace("script.", "")
-                    child_node = self.build_relations_tree(
-                        "script",
-                        called_script_id,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "output"
-                    node["outputs"].append(child_node)
-                elif called_item.startswith("automation."):
-                    called_auto_id = called_item.replace("automation.", "")
-                    child_node = self.build_relations_tree(
-                        "automation",
-                        called_auto_id,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "output"
-                    node["outputs"].append(child_node)
-                else:
-                    # Assume it's a script if no domain prefix
-                    child_node = self.build_relations_tree(
-                        "script",
-                        called_item,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "output"
-                    node["outputs"].append(child_node)
-            else:
-                child_node = self.build_relations_tree(
-                    "entity", entity_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "output"
-                node["outputs"].append(child_node)
-
-        # Flatten children for display
-        node["children"] = node["triggers"] + node["conditions"] + node["outputs"]
-        return node
-
-    def _build_script_node(self, start_id, visited, max_depth, current_depth):
-        """Build node for script."""
-        scripts_data = self.get_scripts_data()
-        script = scripts_data.get(start_id, {})
-
-        label = self.get_script_label(start_id, script)
-        node = {
-            "label": label,
-            "type": "script",
-            "id": start_id,
-            "children": [],
-            "triggers": [],
-            "conditions": [],
-            "outputs": [],
-        }
-
-        # Find automations that trigger this script
-        for automation in self.get_automations_data():
-            outputs = self.find_outputs_in_automation(automation)
-            script_calls = [
-                f"script_call:script.{start_id}",
-                f"script_call:{start_id}",
-                f"script.{start_id}",
-            ]
-            if any(call in outputs for call in script_calls):
-                auto_id = str(automation.get("id", ""))
-                if auto_id:
-                    child_node = self.build_relations_tree(
-                        "automation",
-                        auto_id,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "trigger"
-                    node["triggers"].append(child_node)
-
-        # Find other scripts that trigger this script
-        for script_id, other_script in scripts_data.items():
-            if script_id != start_id:
-                outputs = self.find_outputs_in_script(other_script)
-                script_calls = [
-                    f"script_call:script.{start_id}",
-                    f"script_call:{start_id}",
-                    f"script.{start_id}",
-                ]
-                if any(call in outputs for call in script_calls):
-                    child_node = self.build_relations_tree(
-                        "script",
-                        script_id,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "trigger"
-                    node["triggers"].append(child_node)
-
-        # Get entities involved in this script
-        condition_entities = self.find_conditions_in_script(script)
-        output_entities = self.find_outputs_in_script(script)
-
-        # Add condition entities
-        for entity_id in condition_entities:
-            if not entity_id.startswith("script_call:"):
-                child_node = self.build_relations_tree(
-                    "entity", entity_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "condition"
-                node["conditions"].append(child_node)
-
-        # Add output entities and called scripts/automations
-        for entity_id in output_entities:
-            if entity_id.startswith("script_call:"):
-                called_item = entity_id.replace("script_call:", "")
-                if called_item.startswith("script."):
-                    called_script_id = called_item.replace("script.", "")
-                    child_node = self.build_relations_tree(
-                        "script",
-                        called_script_id,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "output"
-                    node["outputs"].append(child_node)
-                elif called_item.startswith("automation."):
-                    called_auto_id = called_item.replace("automation.", "")
-                    child_node = self.build_relations_tree(
-                        "automation",
-                        called_auto_id,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "output"
-                    node["outputs"].append(child_node)
-                else:
-                    # Assume it's a script if no domain prefix
-                    child_node = self.build_relations_tree(
-                        "script",
-                        called_item,
-                        visited.copy(),
-                        max_depth,
-                        current_depth + 1,
-                    )
-                    child_node["relationship"] = "output"
-                    node["outputs"].append(child_node)
-            else:
-                child_node = self.build_relations_tree(
-                    "entity", entity_id, visited.copy(), max_depth, current_depth + 1
-                )
-                child_node["relationship"] = "output"
-                node["outputs"].append(child_node)
-
-        # Flatten children for display
-        node["children"] = node["triggers"] + node["conditions"] + node["outputs"]
-        return node

@@ -4,15 +4,44 @@
     <meta charset="UTF-8">
     <title>Advanced Relations Visualization</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 2em; }
         h1 { color: #2196f3; }
         #visualization {
             border: 1px solid #ccc;
-            min-height: 400px;
             margin-top: 2em;
-            overflow: auto;
-            max-height: 80vh;
+            overflow: hidden;
+            position: relative;
+            height: calc(100vh - 500px);
+            min-height: 300px;
+        }
+        #network-container {
+            width: 100%;
+            height: 100%;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #controls button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 5px;
+        }
+        #controls button:hover {
+            background: #1976d2;
         }
         .section { margin-bottom: 2em; }
         .label { font-weight: bold; }
@@ -77,6 +106,63 @@
             color: #666;
             font-style: italic;
         }
+
+        /* Legend styles */
+        .legend {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 1em;
+            font-size: 12px;
+        }
+        .legend-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #333;
+        }
+        .legend-section {
+            margin-bottom: 10px;
+        }
+        .legend-section:last-child {
+            margin-bottom: 0;
+        }
+        .legend-section-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        .legend-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-shape {
+            width: 16px;
+            height: 16px;
+            border: 2px solid;
+            display: inline-block;
+            text-align: center;
+            line-height: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        .legend-shape.ellipse {
+            border-radius: 50%;
+        }
+        .legend-shape.box {
+            border-radius: 2px;
+        }
+        .legend-shape.diamond {
+            transform: rotate(45deg);
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -102,45 +188,64 @@
             <div class="dropdown-list"></div>
         </div>
     </div>
-    <div id="visualization">
-        <div id="legend" style="background: #f9f9f9; padding: 15px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #ddd;">
-            <h3 style="margin-top: 0; color: #333;">Flowchart Legend:</h3>
-            <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="width: 20px; height: 20px; background: #e3f2fd; border: 2px solid #2196f3; border-radius: 4px;"></div>
-                    <span>Entity</span>
+    <div class="section">
+        <span class="label">Recursion Depth:</span><br>
+        <div style="display: flex; gap: 2em; align-items: flex-start; margin-top: 0.5em;">
+            <div style="flex-shrink: 0;">
+                <input type="number" id="depth-input" value="3" min="0" step="1" style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 100px;">
+                <div style="font-size: 12px; color: #666; margin-top: 4px; width: 250px;">
+                    Enter depth (0 = infinite, higher values show more indirect relationships but may take longer).
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="width: 20px; height: 20px; background: #fffde7; border: 2px solid #ff9800; border-radius: 4px;"></div>
-                    <span>Automation</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="width: 20px; height: 20px; background: #e8f5e9; border: 2px solid #4caf50; border-radius: 4px;"></div>
-                    <span>Script</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 10px; margin-left: 20px;">
-                    <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 20px; height: 2px; background: #f44336;"></div>
-                        <div style="background: #f44336; color: white; padding: 2px 4px; border-radius: 8px; font-size: 9px; font-weight: bold;">T</div>
-                        <span style="font-size: 12px;">Trigger</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 20px; height: 2px; background: #ff9800;"></div>
-                        <div style="background: #ff9800; color: white; padding: 2px 4px; border-radius: 8px; font-size: 9px; font-weight: bold;">C</div>
-                        <span style="font-size: 12px;">Condition</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 20px; height: 2px; background: #4caf50;"></div>
-                        <div style="background: #4caf50; color: white; padding: 2px 4px; border-radius: 8px; font-size: 9px; font-weight: bold;">O</div>
-                        <span style="font-size: 12px;">Output</span>
-                    </div>
+                <div id="depth-warning" style="font-size: 12px; color: #ff9800; margin-top: 4px; display: none; width: 250px;">
+                    Warning: High depth values may significantly slow down the analysis.
                 </div>
             </div>
-            <div style="margin-top: 10px; font-size: 12px; color: #666;">
-                Tree visualization shows relationships with connecting lines. Dashed borders indicate circular references.
+            <div class="legend" style="flex: 1; margin-top: 0;">
+                <div class="legend-title">Legend</div>
+                <div class="legend-items" style="gap: 20px;">
+                    <div class="legend-item">
+                        <div class="legend-shape ellipse" style="background: #e3f2fd; border-color: #2196f3;"></div>
+                        <span>Entity</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-shape box" style="background: #e8f5e8; border-color: #4caf50;"></div>
+                        <span>Automation</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-shape diamond" style="background: #fff3e0; border-color: #ff9800;"></div>
+                        <span>Script</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-shape ellipse" style="background: #fff59d; border-color: #ffc107;"></div>
+                        <span>Selected</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-shape ellipse" style="background: #ffebee; border-color: #f44336;"></div>
+                        <span>Trigger</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-shape ellipse" style="background: #f3e5f5; border-color: #9c27b0;"></div>
+                        <span>Condition</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-shape ellipse" style="background: #e0f2f1; border-color: #009688;"></div>
+                        <span>Output</span>
+                    </div>
+                </div>
             </div>
         </div>
-        <div id="flowchart-container"></div>
+    </div>
+    <div id="visualization">
+        <div id="controls">
+            <button id="download-btn">Download JSON</button>
+            <button id="fit-btn">Fit View</button>
+            <button id="reset-zoom-btn">Reset Zoom</button>
+            <button id="layout-toggle-btn">Hierarchical Layout</button>
+        </div>
+        <div id="network-container"></div>
+        <div id="no-selection-message" style="padding: 40px; text-align: center; color: #666; font-size: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+            Select an entity, automation, or script above to view its relationships.
+        </div>
     </div>
     <script>
     // Store all data for filtering
@@ -155,227 +260,360 @@
         entities: null,
         automations: null,
         scripts: null
-    };    function renderFlowchart(data) {
-      var container = document.getElementById('flowchart-container');
-      container.innerHTML = '';
-      if (!data || !data.root) {
-        container.textContent = 'No related items found.';
-        return;
-      }
+    };
 
-      // Simple tree visualization using CSS flexbox
-      var treeContainer = document.createElement('div');
-      treeContainer.style.display = 'flex';
-      treeContainer.style.flexDirection = 'column';
-      treeContainer.style.alignItems = 'center';
-      treeContainer.style.padding = '20px';
-      treeContainer.style.fontFamily = 'Arial, sans-serif';
+    // Store current JSON data for download
+    var currentJsonData = null;
+    var network = null;
+    var networkData = null;
 
-      function createNode(node, isRoot = false) {
-        var nodeDiv = document.createElement('div');
-        nodeDiv.style.display = 'inline-block';
-        nodeDiv.style.padding = '12px 16px';
-        nodeDiv.style.margin = '8px';
-        nodeDiv.style.border = '2px solid #888';
-        nodeDiv.style.borderRadius = '8px';
-        nodeDiv.style.textAlign = 'center';
-        nodeDiv.style.backgroundColor = 'white';
-        nodeDiv.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-        nodeDiv.style.position = 'relative';
-        nodeDiv.style.minWidth = '150px';
-        nodeDiv.style.fontSize = isRoot ? '14px' : '12px';
-        nodeDiv.style.fontWeight = isRoot ? 'bold' : 'normal';
+    function createNetworkVisualization(data) {
+        var container = document.getElementById('network-container');
+        var noSelectionMessage = document.getElementById('no-selection-message');
+        var downloadBtn = document.getElementById('download-btn');
 
-        // Color coding by type
-        if (node.type === 'entity') {
-          nodeDiv.style.backgroundColor = '#e3f2fd';
-          nodeDiv.style.borderColor = '#2196f3';
-        } else if (node.type === 'automation') {
-          nodeDiv.style.backgroundColor = '#fffde7';
-          nodeDiv.style.borderColor = '#ff9800';
-        } else if (node.type === 'script') {
-          nodeDiv.style.backgroundColor = '#e8f5e9';
-          nodeDiv.style.borderColor = '#4caf50';
-        }
-
-        // Add relationship badge
-        if (node.relationship) {
-          var badge = document.createElement('div');
-          badge.style.position = 'absolute';
-          badge.style.top = '-8px';
-          badge.style.right = '-8px';
-          badge.style.padding = '2px 6px';
-          badge.style.fontSize = '9px';
-          badge.style.borderRadius = '10px';
-          badge.style.fontWeight = 'bold';
-          badge.style.color = 'white';
-          badge.style.zIndex = '10';
-
-          if (node.relationship === 'trigger') {
-            badge.style.backgroundColor = '#f44336';
-            badge.textContent = 'T';
-          } else if (node.relationship === 'condition') {
-            badge.style.backgroundColor = '#ff9800';
-            badge.textContent = 'C';
-          } else if (node.relationship === 'output') {
-            badge.style.backgroundColor = '#4caf50';
-            badge.textContent = 'O';
-          }
-
-          nodeDiv.appendChild(badge);
-        }
-
-        // Add reference indicator for cycles
-        if (node.is_reference) {
-          nodeDiv.style.opacity = '0.7';
-          nodeDiv.style.borderStyle = 'dashed';
-          nodeDiv.title = 'Circular reference - already shown above';
-        }
-
-        var label = document.createElement('div');
-        label.textContent = node.label.length > 30 ? node.label.substring(0, 30) + '...' : node.label;
-        label.title = node.label; // Full text on hover
-        nodeDiv.appendChild(label);
-
-        return nodeDiv;
-      }
-
-      function createTreeLevel(nodes, level = 0, visited = new Set()) {
-        if (!nodes || nodes.length === 0 || level >= 5) return null;
-
-        var levelDiv = document.createElement('div');
-        levelDiv.style.display = 'flex';
-        levelDiv.style.flexWrap = 'wrap';
-        levelDiv.style.justifyContent = 'center';
-        levelDiv.style.gap = '20px';
-        levelDiv.style.marginTop = level > 0 ? '30px' : '0';
-
-        // Add connecting line from parent level
-        if (level > 0) {
-          var connector = document.createElement('div');
-          connector.style.width = '2px';
-          connector.style.height = '20px';
-          connector.style.backgroundColor = '#666';
-          connector.style.margin = '0 auto 10px auto';
-          levelDiv.appendChild(connector);
-        }
-
-        var nodeContainer = document.createElement('div');
-        nodeContainer.style.display = 'flex';
-        nodeContainer.style.flexWrap = 'wrap';
-        nodeContainer.style.justifyContent = 'center';
-        nodeContainer.style.gap = '20px';
-
-        nodes.forEach(function(node) {
-          var nodeKey = node.type + ':' + (node.id || node.label);
-
-          var nodeElement = createNode(node, level === 0);
-
-          if (visited.has(nodeKey) && level > 0) {
-            // Mark as reference but still show it
-            node.is_reference = true;
-            nodeElement = createNode(node, false);
-          } else {
-            visited.add(nodeKey);
-          }
-
-          var nodeWrapper = document.createElement('div');
-          nodeWrapper.style.display = 'flex';
-          nodeWrapper.style.flexDirection = 'column';
-          nodeWrapper.style.alignItems = 'center';
-
-          // Add visual grouping for automations and scripts that have direct children
-          if ((node.type === 'automation' || node.type === 'script') && node.children && node.children.length > 0 && !node.is_reference) {
-            nodeWrapper.style.border = '2px dashed ' + (node.type === 'automation' ? '#ff9800' : '#4caf50');
-            nodeWrapper.style.borderRadius = '12px';
-            nodeWrapper.style.padding = '15px';
-            nodeWrapper.style.margin = '5px';
-            nodeWrapper.style.backgroundColor = node.type === 'automation' ? 'rgba(255, 152, 0, 0.05)' : 'rgba(76, 175, 80, 0.05)';
-          }
-
-          nodeWrapper.appendChild(nodeElement);          // Add only direct children (level + 1) if not a reference and has children
-          if (!node.is_reference && node.children && node.children.length > 0) {
-            // For automations/scripts with visual grouping, only include LEAF entities (entities with no automation/script children)
-            if ((node.type === 'automation' || node.type === 'script') && node.children && node.children.length > 0 && !node.is_reference) {
-              // Only entities that don't lead to other automations/scripts
-              var leafEntities = node.children.filter(function(child) {
-                if (child.type !== 'entity') return false;
-                // Check if this entity has automation/script children
-                if (!child.children || child.children.length === 0) return true;
-                var hasAutomationScriptChildren = child.children.some(function(grandchild) {
-                  return grandchild.type === 'automation' || grandchild.type === 'script';
-                });
-                return !hasAutomationScriptChildren;
-              });
-
-              // All other children (entities with automation/script children, and direct automation/script children)
-              var otherChildren = node.children.filter(function(child) {
-                if (child.type === 'automation' || child.type === 'script') return true;
-                if (child.type === 'entity' && child.children && child.children.length > 0) {
-                  var hasAutomationScriptChildren = child.children.some(function(grandchild) {
-                    return grandchild.type === 'automation' || grandchild.type === 'script';
-                  });
-                  return hasAutomationScriptChildren;
-                }
-                return false;
-              });
-
-              // Add leaf entities inside the box
-              if (leafEntities.length > 0) {
-                var entityLevel = createTreeLevel(leafEntities, level + 1, new Set(visited));
-                if (entityLevel) {
-                  nodeWrapper.appendChild(entityLevel);
-                }
-              }
-
-              // Add other children outside the box
-              if (otherChildren.length > 0) {
-                var otherLevel = createTreeLevel(otherChildren, level + 1, new Set(visited));
-                if (otherLevel) {
-                  nodeWrapper._indirectChildren = otherLevel;
-                }
-              }
-            } else {
-              // For entities and other cases, show all children normally
-              var childLevel = createTreeLevel(node.children, level + 1, new Set(visited));
-              if (childLevel) {
-                nodeWrapper.appendChild(childLevel);
-              }
+        if (!data || data.error) {
+            noSelectionMessage.style.display = 'block';
+            if (network) {
+                network.destroy();
+                network = null;
             }
-          }
+            currentJsonData = null;
+            return;
+        }
 
-          nodeContainer.appendChild(nodeWrapper);
+        // Store the data for download
+        currentJsonData = data;
+        noSelectionMessage.style.display = 'none';
 
-          // Add indirect children (other automations/scripts) after the wrapped node
-          if (nodeWrapper._indirectChildren) {
-            nodeContainer.appendChild(nodeWrapper._indirectChildren);
-          }
+        var nodes = new vis.DataSet();
+        var edges = new vis.DataSet();
+        var nodeIds = new Set();
+        var edgeId = 0;
+
+        // Track edges to prevent duplicates
+        var edgeMap = new Map();
+
+        // Color scheme for different types
+        var colors = {
+            entity: { background: '#e3f2fd', border: '#2196f3' },
+            automation: { background: '#e8f5e8', border: '#4caf50' },
+            script: { background: '#fff3e0', border: '#ff9800' },
+            trigger: { background: '#ffebee', border: '#f44336' },
+            condition: { background: '#f3e5f5', border: '#9c27b0' },
+            output: { background: '#e0f2f1', border: '#009688' },
+            selected: { background: '#fff59d', border: '#ffc107' }
+        };
+
+        function createNodeId(type, id, relationship, level) {
+            // Use only type and id to ensure each item appears only once
+            return `${type}_${id}`;
+        }
+
+        function addNode(type, id, label, relationship, level, isMain = false) {
+            var nodeId = createNodeId(type, id, relationship, level);
+            if (nodeIds.has(nodeId)) return nodeId;
+
+            var color = isMain ? colors.selected : colors[type];
+            var shape = type === 'automation' ? 'box' : type === 'script' ? 'diamond' : 'ellipse';
+
+            // Create a display label that prioritizes friendly names
+            var baseLabel = label;
+            if (type === 'entity') {
+                // For entities, always use friendly name if available, otherwise use ID
+                baseLabel = label || id;
+            }
+            // For automations and scripts, use the friendly name as-is
+
+            // Use the base label without relationship prefix
+            var displayLabel = baseLabel;
+
+            nodes.add({
+                id: nodeId,
+                label: displayLabel,
+                color: color,
+                shape: shape,
+                font: { size: isMain ? 16 : 12, color: '#333', bold: isMain },
+                borderWidth: isMain ? 4 : 2,
+                level: level,
+                type: type,
+                originalId: id,
+                relationship: relationship,
+                isMain: isMain
+            });
+
+            nodeIds.add(nodeId);
+            return nodeId;
+        }
+
+        function addEdge(fromId, toId, label, color = '#666') {
+            var edgeKey = `${fromId}->${toId}`;
+
+            if (edgeMap.has(edgeKey)) {
+                // Edge already exists, add this label (allow duplicates for counting)
+                var existingEdge = edgeMap.get(edgeKey);
+                var existingLabels = existingEdge.labels || [];
+
+                // Always add the label to count duplicates
+                existingLabels.push(label);
+                existingEdge.labels = existingLabels;
+
+                // Create smart combined label
+                var combinedLabel = createCombinedLabel(existingLabels);
+
+                // Update existing edge
+                edges.update({
+                    id: existingEdge.id,
+                    label: combinedLabel
+                });
+            } else {
+                // New edge
+                var newEdge = {
+                    id: edgeId++,
+                    from: fromId,
+                    to: toId,
+                    label: label,
+                    color: { color: color },
+                    arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+                    font: { size: 10, color: '#666' },
+                    labels: [label]
+                };
+
+                edges.add(newEdge);
+                edgeMap.set(edgeKey, newEdge);
+            }
+        }
+
+        function createCombinedLabel(labels) {
+            if (labels.length === 1) {
+                return labels[0];
+            }
+
+            // Count occurrences of each label type
+            var labelCounts = {};
+            labels.forEach(function(label) {
+                labelCounts[label] = (labelCounts[label] || 0) + 1;
+            });
+
+            // Create combined label
+            var parts = [];
+            Object.keys(labelCounts).forEach(function(labelType) {
+                var count = labelCounts[labelType];
+                if (count > 1) {
+                    parts.push(`${labelType} (${count})`);
+                } else {
+                    parts.push(labelType);
+                }
+            });
+
+            return parts.join(', ');
+        }
+
+        // Add main node (selected item)
+        // Handle double-nesting if present
+        var relations = data.relations.relations || data.relations;
+        var mainNodeId = addNode(
+            relations.item_type,
+            relations.item_id,
+            relations.friendly_name,
+            'main',
+            0,
+            true
+        );
+
+        // Process relationships recursively
+        function processRelationships(items, parentNodeId, parentLevel, isUpstream) {
+            if (!items || !Array.isArray(items)) return;
+
+            items.forEach(function(item, index) {
+                var level = isUpstream ? parentLevel - 1 : parentLevel + 1;
+                var nodeId = addNode(
+                    item.item_type,
+                    item.item_id,
+                    item.friendly_name,
+                    item.relation_type,
+                    level
+                );
+
+                // Add edge between parent and child
+                if (isUpstream) {
+                    // For upstream: child affects parent
+                    var edgeLabel = item.relation_type;
+                    var edgeColor = colors[item.relation_type]?.border || '#666';
+                    addEdge(nodeId, parentNodeId, edgeLabel, edgeColor);
+                } else {
+                    // For downstream: parent affects child
+                    var edgeLabel = item.relation_type;
+                    var edgeColor = colors[item.relation_type]?.border || '#666';
+                    addEdge(parentNodeId, nodeId, edgeLabel, edgeColor);
+                }
+
+                // Process nested relationships
+                if (item.upstream && Array.isArray(item.upstream) && item.upstream.length > 0) {
+                    processRelationships(item.upstream, nodeId, level, true);
+                }
+                if (item.downstream && Array.isArray(item.downstream) && item.downstream.length > 0) {
+                    processRelationships(item.downstream, nodeId, level, false);
+                }
+            });
+        }
+
+        // Process upstream relationships
+        if (relations.upstream && Array.isArray(relations.upstream)) {
+            processRelationships(relations.upstream, mainNodeId, 0, true);
+        }
+
+        // Process downstream relationships
+        if (relations.downstream && Array.isArray(relations.downstream)) {
+            processRelationships(relations.downstream, mainNodeId, 0, false);
+        }
+
+        // Create network
+        networkData = { nodes: nodes, edges: edges };
+
+        var options = {
+            layout: {
+                improvedLayout: true,
+                clusterThreshold: 150
+            },
+            physics: {
+                enabled: true,
+                stabilization: { iterations: 100 },
+                barnesHut: {
+                    gravitationalConstant: -8000,
+                    centralGravity: 0.3,
+                    springLength: 95,
+                    springConstant: 0.04,
+                    damping: 0.09
+                }
+            },
+            nodes: {
+                font: { size: 12 },
+                margin: 10,
+                widthConstraint: { maximum: 200 }
+            },
+            edges: {
+                smooth: {
+                    enabled: true,
+                    type: 'dynamic',
+                    roundness: 0.5
+                },
+                arrows: {
+                    to: { enabled: true, scaleFactor: 0.8 }
+                }
+            },
+            interaction: {
+                dragNodes: true,
+                dragView: true,
+                zoomView: true
+            }
+        };
+
+        if (network) {
+            network.destroy();
+        }
+
+        network = new vis.Network(container, networkData, options);
+
+        // Add click handler for nodes
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                var node = nodes.get(nodeId);
+
+                // If it's not the main node and has the required properties, allow navigation
+                if (!node.isMain && node.originalId && node.type) {
+                    var apiType = node.type === 'entity' ? 'entity' : node.type;
+
+                    // Update the appropriate dropdown
+                    var dropdownType = apiType === 'entity' ? 'entities' : apiType + 's';
+                    var input = document.querySelector('#' + dropdownType + '-dropdown .search-input');
+                    if (input) {
+                        // Find the item in allData to get the display text
+                        var item = allData[dropdownType].find(function(item) {
+                            return (apiType === 'entity' ? item.entity_id : item.id) === node.originalId;
+                        });
+
+                        if (item) {
+                            var displayText;
+                            if (apiType === 'entity') {
+                                displayText = item.friendly_name && item.friendly_name !== item.entity_id
+                                    ? item.friendly_name
+                                    : item.entity_id;
+                            } else {
+                                displayText = item.alias + ' (' + item.id + ')';
+                            }
+
+                            input.value = displayText;
+                            selectedValues[dropdownType] = node.originalId;
+
+                            // Clear other selections
+                            Object.keys(selectedValues).forEach(function(key) {
+                                if (key !== dropdownType) {
+                                    selectedValues[key] = null;
+                                    var otherInput = document.querySelector('#' + key + '-dropdown .search-input');
+                                    if (otherInput) otherInput.value = '';
+                                }
+                            });
+
+                            // Fetch new data
+                            fetchAndShowFlow(apiType, node.originalId);
+                        }
+                    }
+                }
+            }
         });
 
-        levelDiv.appendChild(nodeContainer);
-        return levelDiv;
-      }
-
-      var rootLevel = createTreeLevel([data.root], 0);
-      if (rootLevel) {
-        treeContainer.appendChild(rootLevel);
-      }
-
-      container.appendChild(treeContainer);
+        // Fit the network to show all nodes
+        setTimeout(function() {
+            network.fit();
+        }, 100);
     }
 
-    function fetchAndShowFlow(type, id) {
+    function renderJsonOutput(data) {
+        createNetworkVisualization(data);
+    }
+
+    function downloadJson() {
+        if (!currentJsonData) return;
+
+        var dataStr = JSON.stringify(currentJsonData, null, 2);
+        var dataBlob = new Blob([dataStr], {type: 'application/json'});
+        var url = URL.createObjectURL(dataBlob);
+
+        var link = document.createElement('a');
+        link.href = url;
+
+        // Generate filename based on the selected item
+        var filename = 'relations';
+        if (currentJsonData.relations) {
+            // Handle double-nesting if present
+            var relations = currentJsonData.relations.relations || currentJsonData.relations;
+            if (relations.item_id) {
+                filename = 'relations_' + relations.item_type + '_' + relations.item_id.replace(/[^a-zA-Z0-9]/g, '_');
+            }
+        }
+        link.download = filename + '.json';
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }    function fetchAndShowFlow(type, id) {
+      var depthInput = document.getElementById('depth-input');
+      var depth = depthInput.value;
+
       var xhr = new XMLHttpRequest();
-      xhr.open('GET', '/api/advancedrelations/related?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id), true);
+      xhr.open('GET', '/api/advancedrelations/related?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id) + '&depth=' + encodeURIComponent(depth), true);
       xhr.withCredentials = true;
       xhr.onreadystatechange = function() {
         if (xhr.readyState === 4) {
           if (xhr.status >= 200 && xhr.status < 300) {
             var data = {};
             try { data = JSON.parse(xhr.responseText); } catch (e) {}
-            renderFlowchart(data);
+            renderJsonOutput(data);
           } else {
-            document.getElementById('flowchart-container').textContent = 'Error loading related data.';
+            renderJsonOutput({error: 'Error loading related data. Status: ' + xhr.status});
           }
         }
       };
@@ -410,7 +648,7 @@
                     itemDiv.className = 'dropdown-item';
                     if (type === 'entities') {
                         itemDiv.textContent = item.friendly_name && item.friendly_name !== item.entity_id
-                            ? item.friendly_name + ' (' + item.entity_id + ')'
+                            ? item.friendly_name
                             : item.entity_id;
                         itemDiv.dataset.value = item.entity_id;
                     } else {
@@ -453,7 +691,10 @@
             } else {
                 list.style.display = 'none';
                 selectedValues[type] = null;
-                document.getElementById('flowchart-container').innerHTML = '';
+                // Show the no selection message
+                document.getElementById('json-container').style.display = 'none';
+                document.getElementById('no-selection-message').style.display = 'block';
+                currentJsonData = null;
             }
         });
 
@@ -505,6 +746,104 @@
     }
 
     document.addEventListener('DOMContentLoaded', function() {
+      // Add download button event listener
+      document.getElementById('download-btn').addEventListener('click', downloadJson);
+
+      // Add network control event listeners
+      document.getElementById('fit-btn').addEventListener('click', function() {
+        if (network) {
+          network.fit();
+        }
+      });
+
+      document.getElementById('reset-zoom-btn').addEventListener('click', function() {
+        if (network) {
+          network.moveTo({scale: 1.0});
+        }
+      });
+
+      // Add layout toggle functionality
+      var isHierarchical = false;
+      document.getElementById('layout-toggle-btn').addEventListener('click', function() {
+        if (!network || !networkData) return;
+
+        isHierarchical = !isHierarchical;
+        var options;
+
+        if (isHierarchical) {
+          // Hierarchical layout
+          options = {
+            layout: {
+              hierarchical: {
+                enabled: true,
+                direction: 'UD',
+                sortMethod: 'directed',
+                nodeSpacing: 200,
+                levelSeparation: 150
+              }
+            },
+            physics: {
+              enabled: false
+            }
+          };
+          this.textContent = 'Force Layout';
+        } else {
+          // Force-directed layout
+          options = {
+            layout: {
+              improvedLayout: true,
+              clusterThreshold: 150
+            },
+            physics: {
+              enabled: true,
+              stabilization: { iterations: 100 },
+              barnesHut: {
+                gravitationalConstant: -8000,
+                centralGravity: 0.3,
+                springLength: 95,
+                springConstant: 0.04,
+                damping: 0.09
+              }
+            }
+          };
+          this.textContent = 'Hierarchical Layout';
+        }
+
+        network.setOptions(options);
+        network.fit();
+      });      // Add depth change event listener
+      document.getElementById('depth-input').addEventListener('input', function() {
+        var depthValue = parseInt(this.value);
+        var warningDiv = document.getElementById('depth-warning');
+
+        // Show warning for high depth values
+        if (depthValue > 10 || depthValue === 0) {
+          warningDiv.style.display = 'block';
+          if (depthValue === 0) {
+            warningDiv.textContent = 'Warning: Infinite depth may significantly slow down the analysis.';
+          } else {
+            warningDiv.textContent = 'Warning: High depth values may significantly slow down the analysis.';
+          }
+        } else {
+          warningDiv.style.display = 'none';
+        }
+
+        // Re-fetch data if something is currently selected
+        var currentSelection = null;
+        var currentType = null;
+
+        Object.keys(selectedValues).forEach(function(type) {
+          if (selectedValues[type]) {
+            currentSelection = selectedValues[type];
+            currentType = type === 'entities' ? 'entity' : type.slice(0, -1); // Remove 's' from end
+          }
+        });
+
+        if (currentSelection && currentType) {
+          fetchAndShowFlow(currentType, currentSelection);
+        }
+      });
+
       var xhr = new XMLHttpRequest();
       xhr.open('GET', '/api/advancedrelations/data', true);
       xhr.withCredentials = true;
