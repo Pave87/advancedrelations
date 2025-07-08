@@ -867,9 +867,71 @@ def _find_upstream_for_item(
                     "downstream": [],
                 }
 
+                # Add direct upstream relationships for this automation (its triggers and conditions)
+                for trigger_entity in automation_data.get("triggers", []):
+                    if trigger_entity != item_id and not trigger_entity.startswith(
+                        ("service:", "device:")
+                    ):
+                        trigger_friendly_name = _get_friendly_name(
+                            trigger_entity, automations, scripts, entities
+                        )
+                        upstream_item["upstream"].append(
+                            {
+                                "item_type": "entity",
+                                "item_id": trigger_entity,
+                                "friendly_name": trigger_friendly_name,
+                                "relation_type": "trigger",
+                                "upstream": [],
+                                "downstream": [],
+                            }
+                        )
+
+                for condition_entity in automation_data.get("conditions", []):
+                    if condition_entity != item_id and not condition_entity.startswith(
+                        "device:"
+                    ):
+                        condition_friendly_name = _get_friendly_name(
+                            condition_entity, automations, scripts, entities
+                        )
+                        upstream_item["upstream"].append(
+                            {
+                                "item_type": "entity",
+                                "item_id": condition_entity,
+                                "friendly_name": condition_friendly_name,
+                                "relation_type": "condition",
+                                "upstream": [],
+                                "downstream": [],
+                            }
+                        )
+
+                # Add direct downstream relationships for this automation (its outputs)
+                for output_item in automation_data.get("outputs", []):
+                    if output_item != item_id and not output_item.startswith(
+                        ("service:", "device:")
+                    ):
+                        # Determine if this is a script call or entity
+                        if output_item.startswith("script."):
+                            output_item_type = "script"
+                        else:
+                            output_item_type = "entity"
+
+                        output_friendly_name = _get_friendly_name(
+                            output_item, automations, scripts, entities
+                        )
+                        upstream_item["downstream"].append(
+                            {
+                                "item_type": output_item_type,
+                                "item_id": output_item,
+                                "friendly_name": output_friendly_name,
+                                "relation_type": "output",
+                                "upstream": [],
+                                "downstream": [],
+                            }
+                        )
+
                 # Recursively process upstream for this automation
                 if max_depth == 0 or current_depth < max_depth - 1:
-                    upstream_item["upstream"] = process_upstream(
+                    recursive_upstream = process_upstream(
                         max_depth,
                         automations,
                         scripts,
@@ -879,6 +941,8 @@ def _find_upstream_for_item(
                         current_depth + 1,
                         visited,
                     )
+                    # Extend instead of replace to keep direct relationships
+                    upstream_item["upstream"].extend(recursive_upstream)
 
                 upstream.append(upstream_item)
 
@@ -895,9 +959,54 @@ def _find_upstream_for_item(
                     "downstream": [],
                 }
 
+                # Add direct upstream relationships for this script (its conditions)
+                # Scripts don't typically have triggers, but they can have conditions
+                for condition_entity in script_data.get("conditions", []):
+                    if condition_entity != item_id and not condition_entity.startswith(
+                        "device:"
+                    ):
+                        condition_friendly_name = _get_friendly_name(
+                            condition_entity, automations, scripts, entities
+                        )
+                        upstream_item["upstream"].append(
+                            {
+                                "item_type": "entity",
+                                "item_id": condition_entity,
+                                "friendly_name": condition_friendly_name,
+                                "relation_type": "condition",
+                                "upstream": [],
+                                "downstream": [],
+                            }
+                        )
+
+                # Add direct downstream relationships for this script (its outputs)
+                for output_item in script_data.get("outputs", []):
+                    if output_item != item_id and not output_item.startswith(
+                        ("service:", "device:")
+                    ):
+                        # Determine if this is a script call or entity
+                        if output_item.startswith("script."):
+                            output_item_type = "script"
+                        else:
+                            output_item_type = "entity"
+
+                        output_friendly_name = _get_friendly_name(
+                            output_item, automations, scripts, entities
+                        )
+                        upstream_item["downstream"].append(
+                            {
+                                "item_type": output_item_type,
+                                "item_id": output_item,
+                                "friendly_name": output_friendly_name,
+                                "relation_type": "output",
+                                "upstream": [],
+                                "downstream": [],
+                            }
+                        )
+
                 # Recursively process upstream for this script
                 if max_depth == 0 or current_depth < max_depth - 1:
-                    upstream_item["upstream"] = process_upstream(
+                    recursive_upstream = process_upstream(
                         max_depth,
                         automations,
                         scripts,
@@ -907,6 +1016,8 @@ def _find_upstream_for_item(
                         current_depth + 1,
                         visited,
                     )
+                    # Extend instead of replace to keep direct relationships
+                    upstream_item["upstream"].extend(recursive_upstream)
 
                 upstream.append(upstream_item)
 
@@ -1013,9 +1124,72 @@ def _find_downstream_for_item(
                 "downstream": [],
             }
 
+            # Add direct upstream relationships for this automation (its triggers and conditions)
+            # excluding the current item to avoid immediate circular reference
+            for trigger_entity in automation_data.get("triggers", []):
+                if trigger_entity != item_id and not trigger_entity.startswith(
+                    ("service:", "device:")
+                ):
+                    trigger_friendly_name = _get_friendly_name(
+                        trigger_entity, automations, scripts, entities
+                    )
+                    downstream_item["upstream"].append(
+                        {
+                            "item_type": "entity",
+                            "item_id": trigger_entity,
+                            "friendly_name": trigger_friendly_name,
+                            "relation_type": "trigger",
+                            "upstream": [],
+                            "downstream": [],
+                        }
+                    )
+
+            for condition_entity in automation_data.get("conditions", []):
+                if condition_entity != item_id and not condition_entity.startswith(
+                    "device:"
+                ):
+                    condition_friendly_name = _get_friendly_name(
+                        condition_entity, automations, scripts, entities
+                    )
+                    downstream_item["upstream"].append(
+                        {
+                            "item_type": "entity",
+                            "item_id": condition_entity,
+                            "friendly_name": condition_friendly_name,
+                            "relation_type": "condition",
+                            "upstream": [],
+                            "downstream": [],
+                        }
+                    )
+
+            # Add direct downstream relationships for this automation (its outputs)
+            for output_item in automation_data.get("outputs", []):
+                if output_item != item_id and not output_item.startswith(
+                    ("service:", "device:")
+                ):
+                    # Determine if this is a script call or entity
+                    if output_item.startswith("script."):
+                        output_item_type = "script"
+                    else:
+                        output_item_type = "entity"
+
+                    output_friendly_name = _get_friendly_name(
+                        output_item, automations, scripts, entities
+                    )
+                    downstream_item["downstream"].append(
+                        {
+                            "item_type": output_item_type,
+                            "item_id": output_item,
+                            "friendly_name": output_friendly_name,
+                            "relation_type": "output",
+                            "upstream": [],
+                            "downstream": [],
+                        }
+                    )
+
             # Recursively process downstream for this automation
             if max_depth == 0 or current_depth < max_depth - 1:
-                downstream_item["downstream"] = process_downstream(
+                recursive_downstream = process_downstream(
                     max_depth,
                     automations,
                     scripts,
@@ -1025,6 +1199,8 @@ def _find_downstream_for_item(
                     current_depth + 1,
                     visited,
                 )
+                # Extend instead of replace to keep direct relationships
+                downstream_item["downstream"].extend(recursive_downstream)
 
             downstream.append(downstream_item)
 
@@ -1050,9 +1226,54 @@ def _find_downstream_for_item(
                 "downstream": [],
             }
 
+            # Add direct upstream relationships for this script (its conditions)
+            # Scripts don't typically have triggers, but they can have conditions
+            for condition_entity in script_data.get("conditions", []):
+                if condition_entity != item_id and not condition_entity.startswith(
+                    "device:"
+                ):
+                    condition_friendly_name = _get_friendly_name(
+                        condition_entity, automations, scripts, entities
+                    )
+                    downstream_item["upstream"].append(
+                        {
+                            "item_type": "entity",
+                            "item_id": condition_entity,
+                            "friendly_name": condition_friendly_name,
+                            "relation_type": "condition",
+                            "upstream": [],
+                            "downstream": [],
+                        }
+                    )
+
+            # Add direct downstream relationships for this script (its outputs)
+            for output_item in script_data.get("outputs", []):
+                if output_item != item_id and not output_item.startswith(
+                    ("service:", "device:")
+                ):
+                    # Determine if this is a script call or entity
+                    if output_item.startswith("script."):
+                        output_item_type = "script"
+                    else:
+                        output_item_type = "entity"
+
+                    output_friendly_name = _get_friendly_name(
+                        output_item, automations, scripts, entities
+                    )
+                    downstream_item["downstream"].append(
+                        {
+                            "item_type": output_item_type,
+                            "item_id": output_item,
+                            "friendly_name": output_friendly_name,
+                            "relation_type": "output",
+                            "upstream": [],
+                            "downstream": [],
+                        }
+                    )
+
             # Recursively process downstream for this script
             if max_depth == 0 or current_depth < max_depth - 1:
-                downstream_item["downstream"] = process_downstream(
+                recursive_downstream = process_downstream(
                     max_depth,
                     automations,
                     scripts,
@@ -1062,6 +1283,8 @@ def _find_downstream_for_item(
                     current_depth + 1,
                     visited,
                 )
+                # Extend instead of replace to keep direct relationships
+                downstream_item["downstream"].extend(recursive_downstream)
 
             downstream.append(downstream_item)
 
