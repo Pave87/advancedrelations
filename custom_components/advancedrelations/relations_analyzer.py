@@ -557,7 +557,13 @@ def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
 
             # Only include entities that have dependencies
             if triggers or conditions:
-                friendly_name = entity_entry.get("name") or entity_id
+                # Get friendly name from Home Assistant state
+                state = hass.states.get(entity_id)
+                friendly_name = (
+                    state.attributes.get("friendly_name", entity_id)
+                    if state
+                    else entity_id
+                )
 
                 entity_data = {
                     "id": entity_id,
@@ -669,14 +675,14 @@ def find_comprehensive_relations(
     entities = preprocess_entities(hass)
 
     upstream = process_upstream(
-        max_depth, automations, scripts, entities, item_type, item_id
+        max_depth, automations, scripts, entities, item_type, item_id, hass
     )
     downstream = process_downstream(
-        max_depth, automations, scripts, entities, item_type, item_id
+        max_depth, automations, scripts, entities, item_type, item_id, hass
     )
 
     # Get friendly name for the main item
-    friendly_name = _get_friendly_name(item_id, automations, scripts, entities)
+    friendly_name = _get_friendly_name(item_id, automations, scripts, entities, hass)
 
     # Placeholder implementation - returns empty structure matching the documented format
     return {
@@ -697,6 +703,7 @@ def process_upstream(
     entities: dict[str, Any],
     item_type: str,
     item_id: str,
+    hass: HomeAssistant,
     current_depth: int = 0,
     visited: set[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -709,6 +716,7 @@ def process_upstream(
         entities: Preprocessed entities data
         item_type: Type of item to analyze ('entity', 'automation', or 'script')
         item_id: Unique identifier of the item to analyze
+        hass: Home Assistant instance for accessing current state
         current_depth: Current depth in the recursion
         visited: Set of visited items to prevent circular references
 
@@ -748,6 +756,7 @@ def process_upstream(
                 max_depth,
                 current_depth,
                 visited,
+                hass,
             )
         )
 
@@ -763,6 +772,7 @@ def _find_upstream_for_item(
     max_depth: int,
     current_depth: int,
     visited: set[str],
+    hass: HomeAssistant,
 ) -> list[dict[str, Any]]:
     """Find upstream relations for any item type."""
     upstream = []
@@ -790,7 +800,7 @@ def _find_upstream_for_item(
                         continue
 
                     friendly_name = _get_friendly_name(
-                        trigger_entity, automations, scripts, entities
+                        trigger_entity, automations, scripts, entities, hass
                     )
                     upstream_item = {
                         "item_type": "entity",
@@ -810,6 +820,7 @@ def _find_upstream_for_item(
                             entities,
                             "entity",
                             trigger_entity,
+                            hass,
                             current_depth + 1,
                             visited,
                         )
@@ -823,7 +834,7 @@ def _find_upstream_for_item(
                     continue
 
                 friendly_name = _get_friendly_name(
-                    condition_entity, automations, scripts, entities
+                    condition_entity, automations, scripts, entities, hass
                 )
                 upstream_item = {
                     "item_type": "entity",
@@ -843,6 +854,7 @@ def _find_upstream_for_item(
                         entities,
                         "entity",
                         condition_entity,
+                        hass,
                         current_depth + 1,
                         visited,
                     )
@@ -873,7 +885,7 @@ def _find_upstream_for_item(
                         ("service:", "device:")
                     ):
                         trigger_friendly_name = _get_friendly_name(
-                            trigger_entity, automations, scripts, entities
+                            trigger_entity, automations, scripts, entities, hass
                         )
                         upstream_item["upstream"].append(
                             {
@@ -886,14 +898,14 @@ def _find_upstream_for_item(
                             }
                         )
 
-                for condition_entity in automation_data.get("conditions", []):
-                    if condition_entity != item_id and not condition_entity.startswith(
-                        "device:"
-                    ):
-                        condition_friendly_name = _get_friendly_name(
-                            condition_entity, automations, scripts, entities
-                        )
-                        upstream_item["upstream"].append(
+                    for condition_entity in automation_data.get("conditions", []):
+                        if condition_entity != item_id and not condition_entity.startswith(
+                            "device:"
+                        ):
+                            condition_friendly_name = _get_friendly_name(
+                                condition_entity, automations, scripts, entities, hass
+                            )
+                            upstream_item["upstream"].append(
                             {
                                 "item_type": "entity",
                                 "item_id": condition_entity,
@@ -902,23 +914,21 @@ def _find_upstream_for_item(
                                 "upstream": [],
                                 "downstream": [],
                             }
-                        )
+                        )                    # Add direct downstream relationships for this automation (its outputs)
+                    for output_item in automation_data.get("outputs", []):
+                        if output_item != item_id and not output_item.startswith(
+                            ("service:", "device:")
+                        ):
+                            # Determine if this is a script call or entity
+                            if output_item.startswith("script."):
+                                output_item_type = "script"
+                            else:
+                                output_item_type = "entity"
 
-                # Add direct downstream relationships for this automation (its outputs)
-                for output_item in automation_data.get("outputs", []):
-                    if output_item != item_id and not output_item.startswith(
-                        ("service:", "device:")
-                    ):
-                        # Determine if this is a script call or entity
-                        if output_item.startswith("script."):
-                            output_item_type = "script"
-                        else:
-                            output_item_type = "entity"
-
-                        output_friendly_name = _get_friendly_name(
-                            output_item, automations, scripts, entities
-                        )
-                        upstream_item["downstream"].append(
+                            output_friendly_name = _get_friendly_name(
+                                output_item, automations, scripts, entities, hass
+                            )
+                            upstream_item["downstream"].append(
                             {
                                 "item_type": output_item_type,
                                 "item_id": output_item,
@@ -938,6 +948,7 @@ def _find_upstream_for_item(
                         entities,
                         "automation",
                         automation_data["id"],
+                        hass,
                         current_depth + 1,
                         visited,
                     )
@@ -966,7 +977,7 @@ def _find_upstream_for_item(
                         "device:"
                     ):
                         condition_friendly_name = _get_friendly_name(
-                            condition_entity, automations, scripts, entities
+                            condition_entity, automations, scripts, entities, hass
                         )
                         upstream_item["upstream"].append(
                             {
@@ -991,7 +1002,7 @@ def _find_upstream_for_item(
                             output_item_type = "entity"
 
                         output_friendly_name = _get_friendly_name(
-                            output_item, automations, scripts, entities
+                            output_item, automations, scripts, entities, hass
                         )
                         upstream_item["downstream"].append(
                             {
@@ -1013,6 +1024,7 @@ def _find_upstream_for_item(
                         entities,
                         "script",
                         script_data["id"],
+                        hass,
                         current_depth + 1,
                         visited,
                     )
@@ -1031,6 +1043,7 @@ def process_downstream(
     entities: dict[str, Any],
     item_type: str,
     item_id: str,
+    hass: HomeAssistant | None = None,
     current_depth: int = 0,
     visited: set[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -1043,6 +1056,7 @@ def process_downstream(
         entities: Preprocessed entities data
         item_type: Type of item to analyze ('entity', 'automation', or 'script')
         item_id: Unique identifier of the item to analyze
+        hass: Home Assistant instance for accessing current state
         current_depth: Current depth in the recursion
         visited: Set of visited items to prevent circular references
 
@@ -1082,6 +1096,7 @@ def process_downstream(
                 max_depth,
                 current_depth,
                 visited,
+                hass,
             )
         )
 
@@ -1097,6 +1112,7 @@ def _find_downstream_for_item(
     max_depth: int,
     current_depth: int,
     visited: set[str],
+    hass: HomeAssistant | None = None,
 ) -> list[dict[str, Any]]:
     """Find downstream relations for any item type."""
     downstream = []
@@ -1131,7 +1147,7 @@ def _find_downstream_for_item(
                     ("service:", "device:")
                 ):
                     trigger_friendly_name = _get_friendly_name(
-                        trigger_entity, automations, scripts, entities
+                        trigger_entity, automations, scripts, entities, hass
                     )
                     downstream_item["upstream"].append(
                         {
@@ -1149,7 +1165,7 @@ def _find_downstream_for_item(
                     "device:"
                 ):
                     condition_friendly_name = _get_friendly_name(
-                        condition_entity, automations, scripts, entities
+                        condition_entity, automations, scripts, entities, hass
                     )
                     downstream_item["upstream"].append(
                         {
@@ -1174,7 +1190,7 @@ def _find_downstream_for_item(
                         output_item_type = "entity"
 
                     output_friendly_name = _get_friendly_name(
-                        output_item, automations, scripts, entities
+                        output_item, automations, scripts, entities, hass
                     )
                     downstream_item["downstream"].append(
                         {
@@ -1196,6 +1212,7 @@ def _find_downstream_for_item(
                     entities,
                     "automation",
                     automation_data["id"],
+                    hass,
                     current_depth + 1,
                     visited,
                 )
@@ -1233,7 +1250,7 @@ def _find_downstream_for_item(
                     "device:"
                 ):
                     condition_friendly_name = _get_friendly_name(
-                        condition_entity, automations, scripts, entities
+                        condition_entity, automations, scripts, entities, hass
                     )
                     downstream_item["upstream"].append(
                         {
@@ -1258,7 +1275,7 @@ def _find_downstream_for_item(
                         output_item_type = "entity"
 
                     output_friendly_name = _get_friendly_name(
-                        output_item, automations, scripts, entities
+                        output_item, automations, scripts, entities, hass
                     )
                     downstream_item["downstream"].append(
                         {
@@ -1280,6 +1297,7 @@ def _find_downstream_for_item(
                     entities,
                     "script",
                     script_data["id"],
+                    hass,
                     current_depth + 1,
                     visited,
                 )
@@ -1317,6 +1335,7 @@ def _find_downstream_for_item(
                     entities,
                     "entity",
                     entity_data["id"],
+                    hass,
                     current_depth + 1,
                     visited,
                 )
@@ -1347,7 +1366,7 @@ def _find_downstream_for_item(
                         downstream_item_type = "entity"
 
                     friendly_name = _get_friendly_name(
-                        output_item, automations, scripts, entities
+                        output_item, automations, scripts, entities, hass
                     )
                     downstream_item = {
                         "item_type": downstream_item_type,
@@ -1367,6 +1386,7 @@ def _find_downstream_for_item(
                             entities,
                             downstream_item_type,
                             output_item,
+                            hass,
                             current_depth + 1,
                             visited,
                         )
@@ -1382,12 +1402,19 @@ def _get_friendly_name(
     automations: dict[str, Any],
     scripts: dict[str, Any],
     entities: dict[str, Any],
+    hass: HomeAssistant | None = None,
 ) -> str:
     """Get friendly name for an item."""
     # Check entities first
     for entity_data in entities.get("entities", []):
         if entity_data["id"] == item_id:
             return entity_data.get("friendly_name", item_id)
+
+    # If not found in processed entities and we have hass, try getting from state
+    if hass and item_id.count(".") == 1:  # Looks like an entity ID
+        state = hass.states.get(item_id)
+        if state:
+            return state.attributes.get("friendly_name", item_id)
 
     # Check automations
     for automation_data in automations.get("automations", []):

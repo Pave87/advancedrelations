@@ -301,19 +301,27 @@
             selected: { background: '#fff59d', border: '#ffc107' }
         };
 
-        function createNodeId(type, id, relationship) {
-            return `${type}_${id}_${relationship || 'main'}`;
+        function createNodeId(type, id, relationship, level) {
+            return `${type}_${id}_${relationship || 'main'}_${level}`;
         }
 
         function addNode(type, id, label, relationship, level, isMain = false) {
-            var nodeId = createNodeId(type, id, relationship);
+            var nodeId = createNodeId(type, id, relationship, level);
             if (nodeIds.has(nodeId)) return nodeId;
 
             var color = isMain ? colors.selected : colors[relationship] || colors[type];
             var shape = type === 'automation' ? 'box' : type === 'script' ? 'diamond' : 'ellipse';
 
-            // Add relationship prefix to non-main nodes
-            var displayLabel = isMain ? label : `[${relationship.toUpperCase()}] ${label}`;
+            // Create a display label that prioritizes friendly names
+            var baseLabel = label;
+            if (type === 'entity') {
+                // For entities, always use friendly name if available, otherwise use ID
+                baseLabel = label || id;
+            }
+            // For automations and scripts, use the friendly name as-is
+
+            // Use the base label without relationship prefix
+            var displayLabel = baseLabel;
 
             nodes.add({
                 id: nodeId,
@@ -345,7 +353,8 @@
         }
 
         // Add main node (selected item)
-        var relations = data.relations;
+        // Handle double-nesting if present
+        var relations = data.relations.relations || data.relations;
         var mainNodeId = addNode(
             relations.item_type,
             relations.item_id,
@@ -355,136 +364,51 @@
             true
         );
 
-        var currentLevel = 0;
+        // Process relationships recursively
+        function processRelationships(items, parentNodeId, parentLevel, isUpstream) {
+            if (!items || !Array.isArray(items)) return;
 
-        // Process upstream relationships (what uses this item)
-        function processUpstream(upstream, parentNodeId, level) {
-            if (upstream.used_as_trigger_by) {
-                upstream.used_as_trigger_by.forEach(function(item) {
-                    var nodeId = addNode(item.type, item.id, item.name, 'trigger', level);
-                    addEdge(nodeId, parentNodeId, 'triggers', '#f44336');
+            items.forEach(function(item, index) {
+                var level = isUpstream ? parentLevel - 1 : parentLevel + 1;
+                var nodeId = addNode(
+                    item.item_type,
+                    item.item_id,
+                    item.friendly_name,
+                    item.relation_type,
+                    level
+                );
 
-                    // Process triggers, conditions, outputs for this automation/script
-                    if (item.triggers) {
-                        item.triggers.forEach(function(trigger) {
-                            var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level + 1);
-                            addEdge(triggerNodeId, nodeId, 'triggers', '#f44336');
-                        });
-                    }
-                    if (item.conditions) {
-                        item.conditions.forEach(function(condition) {
-                            var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level + 1);
-                            addEdge(conditionNodeId, nodeId, 'conditions', '#9c27b0');
-                        });
-                    }
-                    if (item.outputs) {
-                        item.outputs.forEach(function(output) {
-                            var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level + 1);
-                            addEdge(nodeId, outputNodeId, 'outputs', '#009688');
-                        });
-                    }
-                });
-            }
+                // Add edge between parent and child
+                if (isUpstream) {
+                    // For upstream: child affects parent
+                    var edgeLabel = item.relation_type;
+                    var edgeColor = colors[item.relation_type]?.border || '#666';
+                    addEdge(nodeId, parentNodeId, edgeLabel, edgeColor);
+                } else {
+                    // For downstream: parent affects child
+                    var edgeLabel = item.relation_type;
+                    var edgeColor = colors[item.relation_type]?.border || '#666';
+                    addEdge(parentNodeId, nodeId, edgeLabel, edgeColor);
+                }
 
-            if (upstream.used_as_condition_by) {
-                upstream.used_as_condition_by.forEach(function(item) {
-                    var nodeId = addNode(item.type, item.id, item.name, 'condition', level);
-                    addEdge(nodeId, parentNodeId, 'uses as condition', '#9c27b0');
-
-                    // Process triggers, conditions, outputs for this automation/script
-                    if (item.triggers) {
-                        item.triggers.forEach(function(trigger) {
-                            var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level + 1);
-                            addEdge(triggerNodeId, nodeId, 'triggers', '#f44336');
-                        });
-                    }
-                    if (item.conditions) {
-                        item.conditions.forEach(function(condition) {
-                            var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level + 1);
-                            addEdge(conditionNodeId, nodeId, 'conditions', '#9c27b0');
-                        });
-                    }
-                    if (item.outputs) {
-                        item.outputs.forEach(function(output) {
-                            var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level + 1);
-                            addEdge(nodeId, outputNodeId, 'outputs', '#009688');
-                        });
-                    }
-                });
-            }
+                // Process nested relationships
+                if (item.upstream && Array.isArray(item.upstream) && item.upstream.length > 0) {
+                    processRelationships(item.upstream, nodeId, level, true);
+                }
+                if (item.downstream && Array.isArray(item.downstream) && item.downstream.length > 0) {
+                    processRelationships(item.downstream, nodeId, level, false);
+                }
+            });
         }
 
-        // Process downstream relationships (what this item affects/depends on)
-        function processDownstream(downstream, parentNodeId, level) {
-            if (downstream.output_by) {
-                downstream.output_by.forEach(function(item) {
-                    var nodeId = addNode(item.type, item.entity_id || item.id, item.friendly_name || item.name, 'output', level);
-                    addEdge(parentNodeId, nodeId, 'depends on / outputs from', '#009688');
-
-                    // Process recursively for deeper relationships
-                    if (item.downstream) {
-                        processDownstream(item.downstream, nodeId, level + 1);
-                    }
-
-                    // Process triggers, conditions, outputs for automations/scripts
-                    if (item.triggers) {
-                        item.triggers.forEach(function(trigger) {
-                            var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level + 1);
-                            addEdge(triggerNodeId, nodeId, 'triggers', '#f44336');
-
-                            if (trigger.downstream) {
-                                processDownstream(trigger.downstream, triggerNodeId, level + 2);
-                            }
-                        });
-                    }
-                    if (item.conditions) {
-                        item.conditions.forEach(function(condition) {
-                            var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level + 1);
-                            addEdge(conditionNodeId, nodeId, 'conditions', '#9c27b0');
-
-                            if (condition.downstream) {
-                                processDownstream(condition.downstream, conditionNodeId, level + 2);
-                            }
-                        });
-                    }
-                    if (item.outputs) {
-                        item.outputs.forEach(function(output) {
-                            var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level + 1);
-                            addEdge(nodeId, outputNodeId, 'outputs', '#009688');
-                        });
-                    }
-                });
-            }
-
-            // Handle automation/script specific downstream
-            if (downstream.triggers) {
-                downstream.triggers.forEach(function(trigger) {
-                    var triggerNodeId = addNode(trigger.type || 'entity', trigger.entity_id || trigger.id, trigger.friendly_name || trigger.name, 'trigger', level);
-                    addEdge(triggerNodeId, parentNodeId, 'triggers', '#f44336');
-                });
-            }
-            if (downstream.conditions) {
-                downstream.conditions.forEach(function(condition) {
-                    var conditionNodeId = addNode(condition.type || 'entity', condition.entity_id || condition.id, condition.friendly_name || condition.name, 'condition', level);
-                    addEdge(conditionNodeId, parentNodeId, 'conditions', '#9c27b0');
-                });
-            }
-            if (downstream.outputs) {
-                downstream.outputs.forEach(function(output) {
-                    var outputNodeId = addNode(output.type, output.entity_id || output.id, output.friendly_name || output.name, 'output', level);
-                    addEdge(parentNodeId, outputNodeId, 'outputs', '#009688');
-                });
-            }
+        // Process upstream relationships
+        if (relations.upstream && Array.isArray(relations.upstream)) {
+            processRelationships(relations.upstream, mainNodeId, 0, true);
         }
 
-        // Process upstream (level -1, -2, etc.)
-        if (relations.upstream) {
-            processUpstream(relations.upstream, mainNodeId, -1);
-        }
-
-        // Process downstream (level 1, 2, etc.)
-        if (relations.downstream) {
-            processDownstream(relations.downstream, mainNodeId, 1);
+        // Process downstream relationships
+        if (relations.downstream && Array.isArray(relations.downstream)) {
+            processRelationships(relations.downstream, mainNodeId, 0, false);
         }
 
         // Create network
@@ -550,7 +474,7 @@
                             var displayText;
                             if (apiType === 'entity') {
                                 displayText = item.friendly_name && item.friendly_name !== item.entity_id
-                                    ? item.friendly_name + ' (' + item.entity_id + ')'
+                                    ? item.friendly_name
                                     : item.entity_id;
                             } else {
                                 displayText = item.alias + ' (' + item.id + ')';
@@ -599,11 +523,10 @@
         // Generate filename based on the selected item
         var filename = 'relations';
         if (currentJsonData.relations) {
-            var relations = currentJsonData.relations;
-            if (relations.entity_id) {
-                filename = 'relations_' + relations.entity_id.replace(/[^a-zA-Z0-9]/g, '_');
-            } else if (relations.id) {
-                filename = 'relations_' + relations.type + '_' + relations.id.replace(/[^a-zA-Z0-9]/g, '_');
+            // Handle double-nesting if present
+            var relations = currentJsonData.relations.relations || currentJsonData.relations;
+            if (relations.item_id) {
+                filename = 'relations_' + relations.item_type + '_' + relations.item_id.replace(/[^a-zA-Z0-9]/g, '_');
             }
         }
         link.download = filename + '.json';
@@ -661,7 +584,7 @@
                     itemDiv.className = 'dropdown-item';
                     if (type === 'entities') {
                         itemDiv.textContent = item.friendly_name && item.friendly_name !== item.entity_id
-                            ? item.friendly_name + ' (' + item.entity_id + ')'
+                            ? item.friendly_name
                             : item.entity_id;
                         itemDiv.dataset.value = item.entity_id;
                     } else {
