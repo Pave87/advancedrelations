@@ -23,6 +23,8 @@
             --shadow-color: rgba(0, 0, 0, 0.1);
             --warning-color: #ff9800;
             --muted-color: #666666;
+            --script-bg: #2979ff;
+            --script-border: #0d47a1;
         }
 
         /* Dark theme */
@@ -42,6 +44,8 @@
             --shadow-color: rgba(0, 0, 0, 0.3);
             --warning-color: #ffb74d;
             --muted-color: #a0a0a0;
+            --script-bg: #1565c0;
+            --script-border: #82b1ff;
         }
 
         body {
@@ -250,6 +254,10 @@
             transform: rotate(45deg);
             border-radius: 2px;
         }
+        .legend-shape.box.script {
+            background: var(--script-bg) !important;
+            border-color: var(--script-border) !important;
+        }
 
         /* Input styles */
         input[type="number"] {
@@ -277,6 +285,30 @@
         /* No selection message */
         #no-selection-message {
             color: var(--muted-color);
+        }
+
+        /* Rotate script nodes to appear as diamonds */
+        .script-diamond {
+            position: relative;
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            transform: rotate(45deg);
+            margin-right: 0.5em;
+        }
+
+        .script-diamond .v-network-node__label {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            white-space: nowrap;
+        }
+
+        /* Script node diamond shape (label inside) */
+        .vis-network .script-diamond {
+            transform: rotate(45deg);
+            border-radius: 2px;
         }
     </style>
 </head>
@@ -329,7 +361,7 @@
                         <span>Automation</span>
                     </div>
                     <div class="legend-item">
-                        <div class="legend-shape diamond" style="background: #fff3e0; border-color: #ff9800;"></div>
+                        <div class="legend-shape box script"></div>
                         <span>Script</span>
                     </div>
                     <div class="legend-item">
@@ -609,21 +641,23 @@
                 return {
                     entity: { background: '#1565c0', border: '#64b5f6' },
                     automation: { background: '#2e7d32', border: '#81c784' },
-                    script: { background: '#ef6c00', border: '#ffb74d' },
+                    script: { background: '#1565c0', border: '#82b1ff' },
+                    selected: { background: '#fff59d', border: '#ffc107' },
                     trigger: { background: '#c62828', border: '#f48fb1' },
                     condition: { background: '#6a1b9a', border: '#ce93d8' },
                     output: { background: '#00695c', border: '#80cbc4' },
-                    selected: { background: '#f57f17', border: '#fff176' }
+                    // ...existing code...
                 };
             } else {
                 return {
                     entity: { background: '#e3f2fd', border: '#2196f3' },
                     automation: { background: '#e8f5e8', border: '#4caf50' },
-                    script: { background: '#fff3e0', border: '#ff9800' },
+                    script: { background: '#2979ff', border: '#0d47a1' },
+                    selected: { background: '#fff59d', border: '#ffc107' },
                     trigger: { background: '#ffebee', border: '#f44336' },
                     condition: { background: '#f3e5f5', border: '#9c27b0' },
                     output: { background: '#e0f2f1', border: '#009688' },
-                    selected: { background: '#fff59d', border: '#ffc107' }
+                    // ...existing code...
                 };
             }
         }
@@ -641,33 +675,34 @@
             if (nodeIds.has(nodeId)) return nodeId;
 
             var color = isMain ? colors.selected : colors[type];
-            var shape = type === 'automation' ? 'box' : type === 'script' ? 'diamond' : 'ellipse';
+            var shape = type === 'automation' ? 'box' : type === 'script' ? 'box' : 'ellipse';
 
-            // Create a display label that prioritizes friendly names
             var baseLabel = label;
             if (type === 'entity') {
-                // For entities, always use friendly name if available, otherwise use ID
+                baseLabel = label || id;
+            } else {
                 baseLabel = label || id;
             }
-            // For automations and scripts, use the friendly name as-is
-
-            // Use the base label without relationship prefix
             var displayLabel = baseLabel;
 
-            nodes.add({
+            var nodeConfig = {
                 id: nodeId,
                 label: displayLabel,
                 color: color,
                 shape: shape,
-                font: { size: isMain ? 16 : 12, color: '#333', bold: isMain },
+                font: { size: isMain ? 16 : 12, color: (type === 'script' ? color.border : '#333'), bold: isMain },
                 borderWidth: isMain ? 4 : 2,
                 level: level,
                 type: type,
                 originalId: id,
                 relationship: relationship,
                 isMain: isMain
-            });
+            };
+            if (type === 'script') {
+                nodeConfig.shapeProperties = { borderRadius: 2, rotation: 0.785398, borderDashes: false };
+            }
 
+            nodes.add(nodeConfig);
             nodeIds.add(nodeId);
             return nodeId;
         }
@@ -820,7 +855,15 @@
             nodes: {
                 font: { size: 12, color: fontColor },
                 margin: 10,
-                widthConstraint: { maximum: 200 }
+                widthConstraint: { maximum: 200 },
+                chosen: {
+                    node: function(values, id, selected, hovering) {
+                        values.shadowColor = 'rgba(0,0,0,0.3)';
+                        values.shadowSize = 10;
+                        values.shadowX = 3;
+                        values.shadowY = 3;
+                    }
+                }
             },
             edges: {
                 smooth: {
