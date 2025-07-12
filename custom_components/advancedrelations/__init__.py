@@ -79,19 +79,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     # Import frontend here to avoid circular imports during HA startup
     from homeassistant.components import frontend
+    from homeassistant.components.http import StaticPathConfig
 
     # Register static file serving for the web panel
     # This serves HTML, CSS, JS files from the www directory to the frontend
-    hass.http.register_static_path(
-        "/advancedrelations-panel",  # URL path where files will be served
-        hass.config.path(
-            "custom_components/advancedrelations/www"
-        ),  # Local filesystem path
-        cache_headers=True,  # Enable browser caching for better performance
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                "/advancedrelations-panel",  # URL path where files will be served
+                hass.config.path(
+                    "custom_components/advancedrelations/www"
+                ),  # Local filesystem path
+                True,  # Enable browser caching for better performance
+            )
+        ]
     )
 
     # Register the Advanced Relations panel in the Home Assistant sidebar
     # This creates an iframe panel that loads our custom web interface
+    # Check if panel already exists and remove it first to prevent conflicts
+    if "advancedrelations-panel" in hass.data.get("frontend_panels", {}):
+        frontend.async_remove_panel(hass, "advancedrelations-panel")
+
     frontend.async_register_built_in_panel(
         hass,
         component_name="iframe",  # Use iframe panel type to embed custom HTML
@@ -116,9 +125,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry for Advanced Relations.
 
-    Called when the integration is being removed or reloaded. Currently this integration
-    doesn't maintain any persistent state or background tasks that need cleanup, so this
-    function simply returns True to indicate successful unload.
+    Called when the integration is being removed or reloaded. This function properly
+    cleans up the panel registration to prevent conflicts during reload.
 
     Args:
         hass: The Home Assistant instance
@@ -128,6 +136,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         bool: True indicating successful unload
 
     """
+    # Import frontend here to avoid circular imports
+    from homeassistant.components import frontend
+
+    # Remove the panel to prevent conflicts during reload
+    frontend.async_remove_panel(hass, "advancedrelations-panel")
+
     return True
 
 
