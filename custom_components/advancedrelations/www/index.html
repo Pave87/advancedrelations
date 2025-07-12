@@ -98,11 +98,37 @@
             color: var(--text-color);
         }
 
+        /* Selection container for responsive layout */
+        .selection-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5em;
+            margin-bottom: 2em;
+        }
+
+        @media (min-width: 1024px) {
+            .selection-container {
+                flex-direction: row;
+                gap: 2em;
+                align-items: flex-start;
+            }
+
+            .selection-item {
+                flex: 1;
+                min-width: 0; /* Allow flex items to shrink below their content size */
+            }
+        }
+
+        .selection-item .label {
+            display: block;
+            margin-bottom: 0.5em;
+        }
+
         /* Searchable dropdown styles */
         .searchable-dropdown {
             position: relative;
-            min-width: 300px;
-            margin-top: 0.5em;
+            min-width: 250px;
+            width: 100%;
         }
 
         .search-input {
@@ -256,25 +282,27 @@
 </head>
 <body>
     <h1>Advanced Relations Visualization</h1>
-    <div class="section">
-        <span class="label">Entities:</span><br>
-        <div class="searchable-dropdown" id="entities-dropdown">
-            <input type="text" class="search-input" placeholder="Search entities..." data-type="entities">
-            <div class="dropdown-list"></div>
+    <div class="selection-container">
+        <div class="selection-item">
+            <span class="label">Entities:</span>
+            <div class="searchable-dropdown" id="entities-dropdown">
+                <input type="text" class="search-input" placeholder="Search entities..." data-type="entities">
+                <div class="dropdown-list"></div>
+            </div>
         </div>
-    </div>
-    <div class="section">
-        <span class="label">Automations:</span><br>
-        <div class="searchable-dropdown" id="automations-dropdown">
-            <input type="text" class="search-input" placeholder="Search automations..." data-type="automations">
-            <div class="dropdown-list"></div>
+        <div class="selection-item">
+            <span class="label">Automations:</span>
+            <div class="searchable-dropdown" id="automations-dropdown">
+                <input type="text" class="search-input" placeholder="Search automations..." data-type="automations">
+                <div class="dropdown-list"></div>
+            </div>
         </div>
-    </div>
-    <div class="section">
-        <span class="label">Scripts:</span><br>
-        <div class="searchable-dropdown" id="scripts-dropdown">
-            <input type="text" class="search-input" placeholder="Search scripts..." data-type="scripts">
-            <div class="dropdown-list"></div>
+        <div class="selection-item">
+            <span class="label">Scripts:</span>
+            <div class="searchable-dropdown" id="scripts-dropdown">
+                <input type="text" class="search-input" placeholder="Search scripts..." data-type="scripts">
+                <div class="dropdown-list"></div>
+            </div>
         </div>
     </div>
     <div class="section">
