@@ -94,6 +94,15 @@ def preprocess_automations(hass: HomeAssistant) -> dict[str, Any]:
                                     calendar_ids = [calendar_ids]
                                 triggers.extend(calendar_ids)
 
+                        # Event trigger - extract entity_id from event_data
+                        if trigger_type == "event" and "event_data" in trigger:
+                            event_data = trigger["event_data"]
+                            if isinstance(event_data, dict) and "entity_id" in event_data:
+                                entity_ids = event_data["entity_id"]
+                                if isinstance(entity_ids, str):
+                                    entity_ids = [entity_ids]
+                                triggers.extend(entity_ids)
+
                         # Device triggers
                         if "device_id" in trigger:
                             triggers.append(f"device:{trigger['device_id']}")
@@ -392,6 +401,16 @@ def _extract_outputs_from_actions(action_list: list) -> list[str]:
                 if isinstance(value, str):
                     outputs.extend(_extract_entities_from_template(value))
 
+        # Fire event action - extract entity_id from event_data
+        if "event" in action and "event_data" in action:
+            event_data = action["event_data"]
+            if isinstance(event_data, dict) and "entity_id" in event_data:
+                entity_ids = event_data["entity_id"]
+                if isinstance(entity_ids, str):
+                    entity_ids = [entity_ids]
+                outputs.extend(entity_ids)
+                found_specific_targets = True
+
         # Script calls - handle both old 'service' and new 'action' formats
         service_name = action.get("service") or action.get("action", "")
         if service_name.startswith("script."):
@@ -418,6 +437,24 @@ def _extract_outputs_from_actions(action_list: list) -> list[str]:
         if service_name in ["scene.turn_on", "scene.apply"]:
             # Already handled by target and data above
             pass
+
+        # Notify service calls - modern notify.send_message with entity_id
+        if service_name == "notify.send_message":
+            # entity_id is used to target notify entities
+            # Already handled by target.entity_id and direct entity_id above
+            pass
+        elif service_name.startswith("notify."):
+            # Legacy notify services - the service name itself is the target
+            # e.g., notify.mobile_app_phone
+            # These don't have entity dependencies we can track
+            pass
+
+        # homeassistant core services
+        if service_name in ["homeassistant.turn_on", "homeassistant.turn_off", "homeassistant.toggle", "homeassistant.update_entity"]:
+            # These use target.entity_id which is already handled above
+            # But ensure we mark it as having specific targets
+            if "target" in action or "entity_id" in action:
+                found_specific_targets = True
 
         # If we have a service/action call but no specific targets, add the service itself
         if not found_specific_targets and service_name:
