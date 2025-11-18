@@ -392,7 +392,12 @@ def _extract_outputs_from_actions(action_list: list) -> list[str]:
                 scene_ids = action["data"]["scene_id"]
                 if isinstance(scene_ids, str):
                     scene_ids = [scene_ids]
-                outputs.extend(scene_ids)
+                # Add scene. prefix if not already present
+                for scene_id in scene_ids:
+                    if not scene_id.startswith("scene."):
+                        outputs.append(f"scene.{scene_id}")
+                    else:
+                        outputs.append(scene_id)
                 found_specific_targets = True
 
         # Data template field - extract entities from templates
@@ -1486,7 +1491,16 @@ def process_upstream(
             )
         )
 
-    return upstream
+    # Deduplicate upstream items based on item_id and relation_type
+    seen = set()
+    deduplicated = []
+    for item in upstream:
+        key = (item["item_id"], item["relation_type"])
+        if key not in seen:
+            seen.add(key)
+            deduplicated.append(item)
+
+    return deduplicated
 
 
 def _find_upstream_for_item(
@@ -2054,7 +2068,16 @@ def process_downstream(
             )
         )
 
-    return downstream
+    # Deduplicate downstream items based on item_id and relation_type
+    seen = set()
+    deduplicated = []
+    for item in downstream:
+        key = (item["item_id"], item["relation_type"])
+        if key not in seen:
+            seen.add(key)
+            deduplicated.append(item)
+
+    return deduplicated
 
 
 def _find_downstream_for_item(
