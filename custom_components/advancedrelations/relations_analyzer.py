@@ -114,10 +114,11 @@ def preprocess_automations(hass: HomeAssistant) -> dict[str, Any]:
                                 triggers.extend(_extract_entities_from_template(template))
 
                         # MQTT trigger with value_template
-                        if trigger_type == "mqtt" and "value_template" in trigger:
-                            template = trigger["value_template"]
-                            if isinstance(template, str):
-                                triggers.extend(_extract_entities_from_template(template))
+                        # (handled by generic value_template block above)
+                        # if trigger_type == "mqtt" and "value_template" in trigger:
+                        #     template = trigger["value_template"]
+                        #     if isinstance(template, str):
+                        #         triggers.extend(_extract_entities_from_template(template))
 
                         # Time-based triggers (time, time_pattern, sun)
                         if trigger_type in ["time", "time_pattern", "sun"]:
@@ -591,12 +592,11 @@ def _extract_conditions_from_actions(action_list: list) -> list[str]:
             # Already handled by the 'if' check above
             pass
 
-        # Variables/set action - extract entities from templates in variable values
-        action_type = action.get("service") or action.get("action", "")
-        if action_type in ["variables", "set"]:
-            # Variables are defined as key-value pairs in the action
-            for key, value in action.items():
-                if key not in ["service", "action", "variables", "set"]:
+        # Variables action - extract entities from templates in variable values
+        if "variables" in action:
+            variables = action["variables"]
+            if isinstance(variables, dict):
+                for value in variables.values():
                     if isinstance(value, str):
                         conditions.extend(_extract_entities_from_template(value))
                     elif isinstance(value, dict):
@@ -1005,10 +1005,6 @@ def _process_bayesian_entity(storage_dir: Path, unique_id: str) -> list[str]:
                             # Entity-based observation
                             if "entity_id" in observation:
                                 triggers.append(observation["entity_id"])
-                            # State observation with entity_id
-                            if "platform" in observation and observation["platform"] == "state":
-                                if "entity_id" in observation:
-                                    triggers.append(observation["entity_id"])
                             # Template observation
                             if "value_template" in observation:
                                 template = observation["value_template"]
