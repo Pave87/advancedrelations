@@ -1309,82 +1309,17 @@ def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
     return {"entities": entities_data}
 
 
-def _extract_entities_from_dashboard_config(config: Any) -> list[str]:
-    """Recursively extract entity references from a dashboard/card config.
-
-    Walks through Lovelace card configurations and extracts entity IDs from
-    known fields like entity, entities, entity_id, camera_image, etc.
-
-    Args:
-        config: A card config dict, list, or primitive value
-
-    Returns:
-        List of entity IDs found in the config
-
-    """
-    entities: list[str] = []
-
-    if isinstance(config, dict):
-        # Direct entity fields
-        for key in ("entity", "camera_image"):
-            val = config.get(key)
-            if isinstance(val, str) and "." in val:
-                entities.append(val)
-
-        # Fields that can be a string or a list of strings
-        for key in ("entities", "entity_id"):
-            val = config.get(key)
-            if isinstance(val, str) and "." in val:
-                entities.append(val)
-            elif isinstance(val, list):
-                for item in val:
-                    if isinstance(item, str) and "." in item:
-                        entities.append(item)
-                    elif isinstance(item, dict):
-                        # entities list can contain dicts with entity key
-                        eid = item.get("entity")
-                        if isinstance(eid, str) and "." in eid:
-                            entities.append(eid)
-
-        # Extract from Jinja2 templates in card config values
-        for key in ("state_template", "content", "title", "name", "header", "label"):
-            val = config.get(key)
-            if isinstance(val, str) and "{" in val:
-                entities.extend(_extract_entities_from_template(val))
-
-        # Recurse into nested structures
-        for key in (
-            "cards", "elements", "conditions", "card", "rows",
-            "columns", "chips", "badges", "sections",
-        ):
-            val = config.get(key)
-            if val is not None:
-                entities.extend(_extract_entities_from_dashboard_config(val))
-
-        # Also recurse into any remaining dict values we haven't handled
-        # to catch custom cards with non-standard nesting
-        for key, val in config.items():
-            if key not in (
-                "entity", "camera_image", "entities", "entity_id",
-                "state_template", "content", "title", "name", "header", "label",
-                "cards", "elements", "conditions", "card", "rows",
-                "columns", "chips", "badges", "sections",
-            ):
-                if isinstance(val, (dict, list)):
-                    entities.extend(_extract_entities_from_dashboard_config(val))
-
-    elif isinstance(config, list):
-        for item in config:
-            entities.extend(_extract_entities_from_dashboard_config(item))
-
-    return entities
-
-
 def _extract_entities_from_dashboards(hass: HomeAssistant) -> set[str]:
     """Extract all entity references from all Lovelace dashboard configs.
 
-    Reads the default dashboard (.storage/lovelace) and any custom dashboards
-    (.storage/lovelace.lovelace_*) and extracts all entity references.
+    Reads dashboard files as raw text and does simple string matching for each
+    known entity ID. This catches all card types without needing to parse
+    card-specific JSON structures.
+
+    Scans:
+    - .storage/lovelace (default dashboard)
+    - .storage/lovelace.lovelace_* (custom dashboards)
+    - ui-lovelace.yaml (YAML-mode dashboards)
 
     Args:
         hass: The Home Assistant instance
@@ -1394,30 +1329,39 @@ def _extract_entities_from_dashboards(hass: HomeAssistant) -> set[str]:
 
     """
     referenced: set[str] = set()
-    storage_dir = Path(hass.config.config_dir) / ".storage"
+    config_dir = Path(hass.config.config_dir)
+    storage_dir = config_dir / ".storage"
 
-    if not storage_dir.exists():
-        return referenced
+    # Build set of all entity IDs to search for
+    all_entity_ids = {state.entity_id for state in hass.states.async_all()}
 
-    # Find all lovelace storage files
-    lovelace_files = list(storage_dir.glob("lovelace*"))
+    # Collect all dashboard file contents as raw text
+    dashboard_texts: list[str] = []
 
-    for lv_file in lovelace_files:
+    # Storage-mode dashboards
+    if storage_dir.exists():
+        for lv_file in storage_dir.glob("lovelace*"):
+            # Skip non-dashboard files (registry, resources)
+            if lv_file.name in ("lovelace_dashboards", "lovelace_resources"):
+                continue
+            try:
+                dashboard_texts.append(lv_file.read_text(encoding="utf-8"))
+            except OSError as e:
+                _LOGGER.debug("Error reading %s: %s", lv_file.name, e)
+
+    # YAML-mode dashboard
+    yaml_dashboard = config_dir / "ui-lovelace.yaml"
+    if yaml_dashboard.exists():
         try:
-            with lv_file.open(encoding="utf-8") as f:
-                data = json.load(f)
+            dashboard_texts.append(yaml_dashboard.read_text(encoding="utf-8"))
+        except OSError as e:
+            _LOGGER.debug("Error reading ui-lovelace.yaml: %s", e)
 
-            # Lovelace storage format: data.config.views[].cards[]
-            config = data.get("data", {}).get("config", {})
-            views = config.get("views", [])
-
-            for view in views:
-                if isinstance(view, dict):
-                    entities = _extract_entities_from_dashboard_config(view)
-                    referenced.update(entities)
-
-        except (json.JSONDecodeError, OSError) as e:
-            _LOGGER.debug("Error reading dashboard file %s: %s", lv_file.name, e)
+    # Simple string match: if the entity ID appears anywhere in any dashboard file
+    combined_text = "\n".join(dashboard_texts)
+    for entity_id in all_entity_ids:
+        if entity_id in combined_text:
+            referenced.add(entity_id)
 
     return referenced
 
