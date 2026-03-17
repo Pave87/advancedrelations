@@ -1137,25 +1137,13 @@
         }
 
         input.addEventListener('input', function() {
-            var searchTerm = input.value;
-            if (searchTerm.length > 0) {
-                filterAndRenderItems(searchTerm);
-                list.style.display = 'block';
-            } else {
-                list.style.display = 'none';
-                selectedValues[type] = null;
-                // Show the no selection message
-                document.getElementById('json-container').style.display = 'none';
-                document.getElementById('no-selection-message').style.display = 'block';
-                currentJsonData = null;
-            }
+            filterAndRenderItems(input.value);
+            list.style.display = 'block';
         });
 
         input.addEventListener('focus', function() {
-            if (input.value.length > 0) {
-                filterAndRenderItems(input.value);
-                list.style.display = 'block';
-            }
+            filterAndRenderItems(input.value);
+            list.style.display = 'block';
         });
 
         // Close dropdown when clicking outside
