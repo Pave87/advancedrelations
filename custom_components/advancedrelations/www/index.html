@@ -196,6 +196,68 @@
             font-style: italic;
         }
 
+        /* Orphan toggle switch */
+        .orphan-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 0.6em;
+            margin-top: 0.5em;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--border-color);
+            transition: 0.3s;
+            border-radius: 22px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .switch input:checked + .slider {
+            background-color: var(--primary-color);
+        }
+
+        .switch input:checked + .slider:before {
+            transform: translateX(18px);
+        }
+
+        .orphan-toggle-label {
+            font-size: 13px;
+            color: var(--text-color);
+        }
+
+        .orphan-loading {
+            font-size: 12px;
+            color: var(--muted-color);
+            font-style: italic;
+        }
+
         /* Legend styles */
         .legend {
             background: var(--section-bg);
@@ -320,6 +382,14 @@
             <div class="searchable-dropdown" id="entities-dropdown">
                 <input type="text" class="search-input" placeholder="Search entities..." data-type="entities">
                 <div class="dropdown-list"></div>
+            </div>
+            <div class="orphan-toggle-container">
+                <label class="switch">
+                    <input type="checkbox" id="orphan-toggle">
+                    <span class="slider"></span>
+                </label>
+                <span class="orphan-toggle-label">Show only unused entities</span>
+                <span id="orphan-loading" class="orphan-loading" style="display: none;">Loading...</span>
             </div>
         </div>
         <div class="selection-item">
@@ -605,6 +675,9 @@
     var currentJsonData = null;
     var network = null;
     var networkData = null;
+
+    // Cached orphaned entity IDs (fetched once per page load)
+    var orphanedEntityIds = null;
 
     function createNetworkVisualization(data) {
         var container = document.getElementById('network-container');
@@ -1229,6 +1302,57 @@
           fetchAndShowFlow(currentType, currentSelection);
         }
       });
+
+      // Orphan toggle handler
+      document.getElementById('orphan-toggle').addEventListener('change', function() {
+        var toggle = this;
+        var loadingEl = document.getElementById('orphan-loading');
+
+        if (toggle.checked) {
+          // Fetch orphaned entities (use cache if available)
+          if (orphanedEntityIds !== null) {
+            applyOrphanFilter();
+          } else {
+            loadingEl.style.display = 'inline';
+            var oxhr = new XMLHttpRequest();
+            oxhr.open('GET', '/api/advancedrelations/orphaned', true);
+            oxhr.withCredentials = true;
+            oxhr.onreadystatechange = function() {
+              if (oxhr.readyState === 4) {
+                loadingEl.style.display = 'none';
+                if (oxhr.status >= 200 && oxhr.status < 300) {
+                  var result = {};
+                  try { result = JSON.parse(oxhr.responseText); } catch (e) {}
+                  orphanedEntityIds = Array.isArray(result.orphaned) ? result.orphaned : [];
+                  applyOrphanFilter();
+                } else {
+                  console.error('Orphaned fetch error:', oxhr.status);
+                  toggle.checked = false;
+                }
+              }
+            };
+            oxhr.send();
+          }
+        } else {
+          // Restore full entities list
+          createSearchableDropdown('entities', allData.entities);
+          // Clear current entity selection
+          selectedValues.entities = null;
+          var entInput = document.querySelector('#entities-dropdown .search-input');
+          if (entInput) entInput.value = '';
+        }
+      });
+
+      function applyOrphanFilter() {
+        var filtered = allData.entities.filter(function(item) {
+          return orphanedEntityIds.indexOf(item.entity_id) !== -1;
+        });
+        createSearchableDropdown('entities', filtered);
+        // Clear current entity selection
+        selectedValues.entities = null;
+        var entInput = document.querySelector('#entities-dropdown .search-input');
+        if (entInput) entInput.value = '';
+      }
 
       var xhr = new XMLHttpRequest();
       xhr.open('GET', '/api/advancedrelations/data', true);

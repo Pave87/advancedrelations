@@ -32,7 +32,7 @@ from .data_loader import (
     list_entities,
     list_scripts,
 )
-from .relations_analyzer import find_comprehensive_relations
+from .relations_analyzer import find_comprehensive_relations, find_orphaned_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,6 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         AdvancedRelationsDataView
     )  # Get entities/automations/scripts data
     hass.http.register_view(AdvancedRelationsRelatedView)  # Get relationship trees
+    hass.http.register_view(AdvancedRelationsOrphanedView)  # Get orphaned entities
 
     return True
 
@@ -353,4 +354,45 @@ class AdvancedRelationsRelatedView(HomeAssistantView):
             _LOGGER.error("Error building relations tree: %s", err)
             return self.json(
                 {"error": f"Failed to build relations tree: {err}"}, status_code=500
+            )
+
+
+class AdvancedRelationsOrphanedView(HomeAssistantView):
+    """HTTP endpoint for finding orphaned entities not used anywhere.
+
+    Returns a list of entity IDs that are not referenced in any automation,
+    script, other entity, or dashboard configuration.
+
+    Attributes:
+        url: The HTTP endpoint path for this view
+        name: The internal name for this view (used for routing)
+        requires_auth: Set to False to allow unauthenticated access for internal panel use
+
+    """
+
+    url = "/api/advancedrelations/orphaned"
+    name = "api:advancedrelations:orphaned"
+    requires_auth = False
+
+    async def get(self, request):
+        """Handle GET requests for orphaned entity detection.
+
+        Args:
+            request: The HTTP request object containing Home Assistant context
+
+        Returns:
+            JSON response containing list of orphaned entity IDs:
+            {"orphaned": ["sensor.unused1", "light.unused2", ...]}
+
+        """
+        hass = request.app["hass"]
+
+        try:
+            orphaned = await hass.async_add_executor_job(find_orphaned_entities, hass)
+            return self.json({"orphaned": orphaned})
+        except Exception as err:
+            _LOGGER.error("Error finding orphaned entities: %s", err)
+            return self.json(
+                {"error": f"Failed to find orphaned entities: {err}"},
+                status_code=500,
             )

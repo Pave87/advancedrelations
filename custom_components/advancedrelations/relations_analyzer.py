@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from slugify import slugify
 
 from homeassistant.core import HomeAssistant
 
@@ -1062,7 +1063,7 @@ def _process_configuration_yaml_entities(hass: HomeAssistant) -> list[dict[str, 
                         # Template sensors
                         for sensor in template_item.get("sensor", []):
                             if isinstance(sensor, dict) and "name" in sensor:
-                                entity_id = f"sensor.{sensor['name'].lower().replace(' ', '_')}"
+                                entity_id = f"sensor.{slugify(sensor['name'], separator='_')}"
                                 conditions = []
 
                                 # Extract from state template
@@ -1092,7 +1093,7 @@ def _process_configuration_yaml_entities(hass: HomeAssistant) -> list[dict[str, 
                         # Template binary sensors
                         for binary_sensor in template_item.get("binary_sensor", []):
                             if isinstance(binary_sensor, dict) and "name" in binary_sensor:
-                                entity_id = f"binary_sensor.{binary_sensor['name'].lower().replace(' ', '_')}"
+                                entity_id = f"binary_sensor.{slugify(binary_sensor['name'], separator='_')}"
                                 conditions = []
 
                                 # Extract from state template
@@ -1306,6 +1307,171 @@ def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
     entities_data.extend(config_yaml_entities)
 
     return {"entities": entities_data}
+
+
+def _extract_entities_from_dashboard_config(config: Any) -> list[str]:
+    """Recursively extract entity references from a dashboard/card config.
+
+    Walks through Lovelace card configurations and extracts entity IDs from
+    known fields like entity, entities, entity_id, camera_image, etc.
+
+    Args:
+        config: A card config dict, list, or primitive value
+
+    Returns:
+        List of entity IDs found in the config
+
+    """
+    entities: list[str] = []
+
+    if isinstance(config, dict):
+        # Direct entity fields
+        for key in ("entity", "camera_image"):
+            val = config.get(key)
+            if isinstance(val, str) and "." in val:
+                entities.append(val)
+
+        # Fields that can be a string or a list of strings
+        for key in ("entities", "entity_id"):
+            val = config.get(key)
+            if isinstance(val, str) and "." in val:
+                entities.append(val)
+            elif isinstance(val, list):
+                for item in val:
+                    if isinstance(item, str) and "." in item:
+                        entities.append(item)
+                    elif isinstance(item, dict):
+                        # entities list can contain dicts with entity key
+                        eid = item.get("entity")
+                        if isinstance(eid, str) and "." in eid:
+                            entities.append(eid)
+
+        # Extract from Jinja2 templates in card config values
+        for key in ("state_template", "content", "title", "name", "header", "label"):
+            val = config.get(key)
+            if isinstance(val, str) and "{" in val:
+                entities.extend(_extract_entities_from_template(val))
+
+        # Recurse into nested structures
+        for key in (
+            "cards", "elements", "conditions", "card", "rows",
+            "columns", "chips", "badges", "sections",
+        ):
+            val = config.get(key)
+            if val is not None:
+                entities.extend(_extract_entities_from_dashboard_config(val))
+
+        # Also recurse into any remaining dict values we haven't handled
+        # to catch custom cards with non-standard nesting
+        for key, val in config.items():
+            if key not in (
+                "entity", "camera_image", "entities", "entity_id",
+                "state_template", "content", "title", "name", "header", "label",
+                "cards", "elements", "conditions", "card", "rows",
+                "columns", "chips", "badges", "sections",
+            ):
+                if isinstance(val, (dict, list)):
+                    entities.extend(_extract_entities_from_dashboard_config(val))
+
+    elif isinstance(config, list):
+        for item in config:
+            entities.extend(_extract_entities_from_dashboard_config(item))
+
+    return entities
+
+
+def _extract_entities_from_dashboards(hass: HomeAssistant) -> set[str]:
+    """Extract all entity references from all Lovelace dashboard configs.
+
+    Reads the default dashboard (.storage/lovelace) and any custom dashboards
+    (.storage/lovelace.lovelace_*) and extracts all entity references.
+
+    Args:
+        hass: The Home Assistant instance
+
+    Returns:
+        Set of entity IDs referenced in dashboards
+
+    """
+    referenced: set[str] = set()
+    storage_dir = Path(hass.config.config_dir) / ".storage"
+
+    if not storage_dir.exists():
+        return referenced
+
+    # Find all lovelace storage files
+    lovelace_files = list(storage_dir.glob("lovelace*"))
+
+    for lv_file in lovelace_files:
+        try:
+            with lv_file.open(encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Lovelace storage format: data.config.views[].cards[]
+            config = data.get("data", {}).get("config", {})
+            views = config.get("views", [])
+
+            for view in views:
+                if isinstance(view, dict):
+                    entities = _extract_entities_from_dashboard_config(view)
+                    referenced.update(entities)
+
+        except (json.JSONDecodeError, OSError) as e:
+            _LOGGER.debug("Error reading dashboard file %s: %s", lv_file.name, e)
+
+    return referenced
+
+
+def find_orphaned_entities(hass: HomeAssistant) -> list[str]:
+    """Find entities that are not referenced anywhere.
+
+    Checks all automations, scripts, other entities, and dashboards to build
+    a set of all referenced entity IDs, then returns any entity_ids from the
+    state machine that are not in that referenced set.
+
+    Args:
+        hass: The Home Assistant instance
+
+    Returns:
+        List of entity IDs that are not used anywhere
+
+    """
+    _LOGGER.info("Finding orphaned entities")
+
+    # Build the set of all referenced entity IDs
+    referenced: set[str] = set()
+
+    # Collect from automations
+    automations = preprocess_automations(hass)
+    for auto in automations.get("automations", []):
+        referenced.update(auto.get("triggers", []))
+        referenced.update(auto.get("conditions", []))
+        referenced.update(auto.get("outputs", []))
+
+    # Collect from scripts
+    scripts = preprocess_scripts(hass)
+    for script in scripts.get("scripts", []):
+        referenced.update(script.get("conditions", []))
+        referenced.update(script.get("outputs", []))
+
+    # Collect from entities (template sensors referencing other entities, etc.)
+    entities = preprocess_entities(hass)
+    for entity in entities.get("entities", []):
+        referenced.update(entity.get("triggers", []))
+        referenced.update(entity.get("conditions", []))
+
+    # Collect from dashboards
+    dashboard_refs = _extract_entities_from_dashboards(hass)
+    referenced.update(dashboard_refs)
+
+    # Get all entity_ids from the state machine
+    all_entity_ids = {state.entity_id for state in hass.states.async_all()}
+
+    # Orphaned = exists in state machine but not referenced anywhere
+    orphaned = sorted(all_entity_ids - referenced)
+
+    _LOGGER.info("Found %d orphaned entities out of %d total", len(orphaned), len(all_entity_ids))
+    return orphaned
 
 
 def find_comprehensive_relations(
