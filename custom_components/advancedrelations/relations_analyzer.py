@@ -1309,112 +1309,75 @@ def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
     return {"entities": entities_data}
 
 
-def _extract_entities_from_dashboards(hass: HomeAssistant) -> set[str]:
-    """Extract all entity references from all Lovelace dashboard configs.
-
-    Reads dashboard files as raw text and does simple string matching for each
-    known entity ID. This catches all card types without needing to parse
-    card-specific JSON structures.
-
-    Scans:
-    - .storage/lovelace (default dashboard)
-    - .storage/lovelace.lovelace_* (custom dashboards)
-    - ui-lovelace.yaml (YAML-mode dashboards)
-
-    Args:
-        hass: The Home Assistant instance
-
-    Returns:
-        Set of entity IDs referenced in dashboards
-
-    """
-    referenced: set[str] = set()
-    config_dir = Path(hass.config.config_dir)
-    storage_dir = config_dir / ".storage"
-
-    # Build set of all entity IDs to search for
-    all_entity_ids = {state.entity_id for state in hass.states.async_all()}
-
-    # Collect all dashboard file contents as raw text
-    dashboard_texts: list[str] = []
-
-    # Storage-mode dashboards
-    if storage_dir.exists():
-        for lv_file in storage_dir.glob("lovelace*"):
-            # Skip non-dashboard files (registry, resources)
-            if lv_file.name in ("lovelace_dashboards", "lovelace_resources"):
-                continue
-            try:
-                dashboard_texts.append(lv_file.read_text(encoding="utf-8"))
-            except OSError as e:
-                _LOGGER.debug("Error reading %s: %s", lv_file.name, e)
-
-    # YAML-mode dashboard
-    yaml_dashboard = config_dir / "ui-lovelace.yaml"
-    if yaml_dashboard.exists():
-        try:
-            dashboard_texts.append(yaml_dashboard.read_text(encoding="utf-8"))
-        except OSError as e:
-            _LOGGER.debug("Error reading ui-lovelace.yaml: %s", e)
-
-    # Simple string match: if the entity ID appears anywhere in any dashboard file
-    combined_text = "\n".join(dashboard_texts)
-    for entity_id in all_entity_ids:
-        if entity_id in combined_text:
-            referenced.add(entity_id)
-
-    return referenced
-
-
 def find_orphaned_entities(hass: HomeAssistant) -> list[str]:
     """Find entities that are not referenced anywhere.
 
-    Checks all automations, scripts, other entities, and dashboards to build
-    a set of all referenced entity IDs, then returns any entity_ids from the
-    state machine that are not in that referenced set.
+    Uses brute-force raw text search across ALL configuration files.
+    If an entity ID string appears anywhere in any config file, it is used.
+    No parsing, no edge cases to miss.
+
+    Scans:
+    - All *.yaml files in config dir and subdirs (automations, scripts,
+      configuration, customize, packages, split configs, etc.)
+    - All files in .storage/ (dashboards, config entries, helper configs, etc.)
 
     Args:
         hass: The Home Assistant instance
 
     Returns:
-        List of entity IDs that are not used anywhere
+        Sorted list of entity IDs that are not used anywhere
 
     """
     _LOGGER.info("Finding orphaned entities")
 
-    # Build the set of all referenced entity IDs
-    referenced: set[str] = set()
+    config_dir = Path(hass.config.config_dir)
+    storage_dir = config_dir / ".storage"
 
-    # Collect from automations
-    automations = preprocess_automations(hass)
-    for auto in automations.get("automations", []):
-        referenced.update(auto.get("triggers", []))
-        referenced.update(auto.get("conditions", []))
-        referenced.update(auto.get("outputs", []))
+    # Read ALL relevant config files as raw text
+    texts: list[str] = []
 
-    # Collect from scripts
-    scripts = preprocess_scripts(hass)
-    for script in scripts.get("scripts", []):
-        referenced.update(script.get("conditions", []))
-        referenced.update(script.get("outputs", []))
+    # All YAML files recursively (automations, scripts, configuration,
+    # customize, packages, split configs, includes, etc.)
+    for yaml_file in config_dir.rglob("*.yaml"):
+        # Skip directories that don't contain user config
+        try:
+            rel = yaml_file.relative_to(config_dir)
+        except ValueError:
+            continue
+        parts = rel.parts
+        if parts and parts[0] in ("custom_components", ".storage", "deps", "tts"):
+            continue
+        try:
+            texts.append(yaml_file.read_text(encoding="utf-8"))
+        except OSError:
+            pass
 
-    # Collect from entities (template sensors referencing other entities, etc.)
-    entities = preprocess_entities(hass)
-    for entity in entities.get("entities", []):
-        referenced.update(entity.get("triggers", []))
-        referenced.update(entity.get("conditions", []))
+    # All .storage files (dashboards, config entries, helper configs, etc.)
+    if storage_dir.exists():
+        for storage_file in storage_dir.iterdir():
+            if storage_file.is_file():
+                try:
+                    texts.append(storage_file.read_text(encoding="utf-8"))
+                except OSError:
+                    pass
 
-    # Collect from dashboards
-    dashboard_refs = _extract_entities_from_dashboards(hass)
-    referenced.update(dashboard_refs)
+    # Join everything into one big searchable text
+    combined_text = "\n".join(texts)
 
     # Get all entity_ids from the state machine
     all_entity_ids = {state.entity_id for state in hass.states.async_all()}
 
-    # Orphaned = exists in state machine but not referenced anywhere
-    orphaned = sorted(all_entity_ids - referenced)
+    # An entity is orphaned if its ID string does not appear in any config file
+    orphaned = sorted(
+        entity_id for entity_id in all_entity_ids
+        if entity_id not in combined_text
+    )
 
-    _LOGGER.info("Found %d orphaned entities out of %d total", len(orphaned), len(all_entity_ids))
+    _LOGGER.info(
+        "Found %d orphaned entities out of %d total",
+        len(orphaned),
+        len(all_entity_ids),
+    )
     return orphaned
 
 
