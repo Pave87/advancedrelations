@@ -51,6 +51,10 @@ async def list_entities(hass: HomeAssistant) -> None:
 
     # Iterate through all current entity states in Home Assistant
     for state in hass.states.async_all():
+        # Skip automations and scripts - they have their own dropdowns in the UI
+        if state.entity_id.startswith(("automation.", "script.")):
+            continue
+
         # Extract friendly name from attributes, fallback to entity_id if not set
         friendly_name = state.attributes.get("friendly_name", state.entity_id)
 

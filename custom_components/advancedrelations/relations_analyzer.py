@@ -1312,14 +1312,14 @@ def preprocess_entities(hass: HomeAssistant) -> dict[str, Any]:
 def find_orphaned_entities(hass: HomeAssistant) -> list[str]:
     """Find entities that are not referenced anywhere.
 
-    Uses brute-force raw text search across ALL configuration files.
-    If an entity ID string appears anywhere in any config file, it is used.
-    No parsing, no edge cases to miss.
+    Uses the same preprocessed relations data that powers the relationship
+    visualization, plus a raw text scan of all config files as a safety net.
 
-    Scans:
-    - All *.yaml files in config dir and subdirs (automations, scripts,
-      configuration, customize, packages, split configs, etc.)
-    - All files in .storage/ (dashboards, config entries, helper configs, etc.)
+    An entity is considered "used" if it appears in:
+    - Any automation's triggers, conditions, or outputs
+    - Any script's conditions or outputs
+    - Any other entity's triggers or conditions
+    - Any file in the config directory (dashboards, YAML configs, storage, etc.)
 
     Args:
         hass: The Home Assistant instance
@@ -1330,47 +1330,80 @@ def find_orphaned_entities(hass: HomeAssistant) -> list[str]:
     """
     _LOGGER.info("Finding orphaned entities")
 
+    # 1. Collect all entity references from preprocessed relations data
+    #    (same data that powers the visualization — known to be correct)
+    referenced: set[str] = set()
+
+    automations = preprocess_automations(hass)
+    for auto in automations.get("automations", []):
+        referenced.update(auto.get("triggers", []))
+        referenced.update(auto.get("conditions", []))
+        referenced.update(auto.get("outputs", []))
+
+    scripts = preprocess_scripts(hass)
+    for script in scripts.get("scripts", []):
+        referenced.update(script.get("conditions", []))
+        referenced.update(script.get("outputs", []))
+
+    entities = preprocess_entities(hass)
+    for entity in entities.get("entities", []):
+        referenced.update(entity.get("triggers", []))
+        referenced.update(entity.get("conditions", []))
+
+    # 2. Also scan every text file in config dir for raw string matches
+    #    (catches dashboards, custom configs, anything the preprocessors miss)
     config_dir = Path(hass.config.config_dir)
-    storage_dir = config_dir / ".storage"
 
-    # Read ALL relevant config files as raw text
+    skip_extensions = {
+        ".db", ".db-shm", ".db-wal", ".log", ".gz", ".zip", ".tar",
+        ".png", ".jpg", ".jpeg", ".gif", ".ico", ".mp3", ".wav", ".mp4",
+        ".bin", ".pyc", ".pyo", ".so", ".dll", ".exe",
+    }
+    skip_dirs = {"custom_components", "deps", "tts", "__pycache__"}
+
     texts: list[str] = []
-
-    # All YAML files recursively (automations, scripts, configuration,
-    # customize, packages, split configs, includes, etc.)
-    for yaml_file in config_dir.rglob("*.yaml"):
-        # Skip directories that don't contain user config
+    for file_path in config_dir.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() in skip_extensions:
+            continue
         try:
-            rel = yaml_file.relative_to(config_dir)
+            rel = file_path.relative_to(config_dir)
         except ValueError:
             continue
-        parts = rel.parts
-        if parts and parts[0] in ("custom_components", ".storage", "deps", "tts"):
+        if any(part in skip_dirs for part in rel.parts):
             continue
         try:
-            texts.append(yaml_file.read_text(encoding="utf-8"))
+            texts.append(file_path.read_text(encoding="utf-8", errors="ignore"))
         except OSError:
             pass
 
-    # All .storage files (dashboards, config entries, helper configs, etc.)
-    if storage_dir.exists():
-        for storage_file in storage_dir.iterdir():
-            if storage_file.is_file():
-                try:
-                    texts.append(storage_file.read_text(encoding="utf-8"))
-                except OSError:
-                    pass
-
-    # Join everything into one big searchable text
     combined_text = "\n".join(texts)
 
-    # Get all entity_ids from the state machine
-    all_entity_ids = {state.entity_id for state in hass.states.async_all()}
+    # 3. Resolve device_id references — if a device is referenced anywhere
+    #    in any config file, ALL entities belonging to that device are "used"
+    storage_dir = config_dir / ".storage"
+    entity_registry_data = _read_storage_file(storage_dir, "core.entity_registry")
+    for entity_entry in entity_registry_data.get("data", {}).get("entities", []):
+        if not isinstance(entity_entry, dict):
+            continue
+        device_id = entity_entry.get("device_id")
+        entity_id = entity_entry.get("entity_id", "")
+        if device_id and device_id in combined_text:
+            referenced.add(entity_id)
 
-    # An entity is orphaned if its ID string does not appear in any config file
+    # 4. Get all entity_ids, excluding automations and scripts
+    all_entity_ids = {
+        state.entity_id
+        for state in hass.states.async_all()
+        if not state.entity_id.startswith(("automation.", "script."))
+    }
+
+    # 5. Entity is orphaned only if NOT in preprocessed relations AND
+    #    NOT found in any config file text
     orphaned = sorted(
         entity_id for entity_id in all_entity_ids
-        if entity_id not in combined_text
+        if entity_id not in referenced and entity_id not in combined_text
     )
 
     _LOGGER.info(

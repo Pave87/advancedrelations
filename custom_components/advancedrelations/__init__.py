@@ -388,7 +388,7 @@ class AdvancedRelationsOrphanedView(HomeAssistantView):
         hass = request.app["hass"]
 
         try:
-            orphaned = await hass.async_add_executor_job(find_orphaned_entities, hass)
+            orphaned = find_orphaned_entities(hass)
             return self.json({"orphaned": orphaned})
         except Exception as err:
             _LOGGER.error("Error finding orphaned entities: %s", err)
